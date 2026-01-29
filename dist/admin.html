@@ -1,0 +1,1113 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PingGo 管理面板</title>
+    <script src="assets/tailwind.min.js"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'Roboto', '"Helvetica Neue"', 'Arial', 'sans-serif'],
+                    },
+                    colors: {
+                        primary: '#2ecc71',
+                        danger: '#e74c3c',
+                        warning: '#f1c40f',
+                        info: '#3498db',
+                        dark: '#2c3e50',
+                    }
+                }
+            }
+        }
+    </script>
+    <script src="assets/socket.io.min.js"></script>
+    <script defer src="assets/alpine.min.js"></script>
+    <script src="assets/chart.min.js"></script>
+    <link rel="stylesheet" href="style.css">
+    <style type="text/tailwindcss">
+        [x-cloak] { display: none !important; }
+        body { 
+            background-color: #f0f2f5; 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+        }
+        .uptime-bar-mini {
+            @apply flex gap-[1px] h-4;
+        }
+        .segment-mini {
+            @apply w-[3px] h-full rounded-[1px];
+        }
+        .stats-box {
+            @apply flex flex-col items-center justify-center text-center p-6 transition-colors hover:bg-gray-50/50;
+        }
+        .stats-title {
+            @apply text-gray-400 text-xs font-bold uppercase tracking-widest mb-1;
+        }
+        .stats-subtitle {
+            @apply text-gray-500 text-sm font-medium mb-2;
+        }
+        .stats-value {
+            @apply text-xl font-bold text-gray-900;
+        }
+    </style>
+</head>
+
+<body class="bg-[#f0f2f5] min-h-screen font-sans text-gray-800" x-data="app()">
+
+    <!-- Header -->
+    <header class="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between sticky top-0 z-30">
+        <div class="flex items-center gap-2">
+            <div class="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
+                <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                </svg>
+            </div>
+            <h1 class="text-2xl font-bold tracking-tight text-gray-900">PingGo</h1>
+        </div>
+        <div class="flex items-center gap-4">
+            <a href="/"
+                class="bg-primary text-white px-4 py-1.5 rounded-full text-sm font-semibold flex items-center gap-2 transition hover:opacity-90">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7">
+                    </path>
+                </svg>
+                仪表盘
+            </a>
+            <button @click="logout" class="text-gray-400 hover:text-danger transition" title="退出登录">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1">
+                    </path>
+                </svg>
+            </button>
+        </div>
+    </header>
+
+    <main class="flex flex-col md:flex-row h-[calc(100vh-73px)] overflow-hidden">
+
+        <!-- Sidebar -->
+        <aside
+            class="w-full md:w-96 bg-white border-b md:border-b-0 md:border-r border-gray-200 flex flex-col overflow-hidden shrink-0 h-[40vh] md:h-auto z-20">
+            <div class="p-4 space-y-4">
+                <div class="grid grid-cols-3 gap-2">
+                    <!-- Overview Button: Blue Theme -->
+                    <button @click="showOverview"
+                        class="flex items-center justify-center py-3 rounded-xl text-xs font-bold transition border group gap-1.5 shadow-sm"
+                        :class="dashboardView === 'overview' 
+                            ? 'bg-blue-500 text-white border-blue-500 shadow-md shadow-blue-200' 
+                            : 'bg-white text-gray-500 border-gray-200 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200'">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z">
+                            </path>
+                        </svg>
+                        <span>总览</span>
+                    </button>
+
+                    <!-- Notification Button: Amber/Purple Theme (Using Purple here for distinction) -->
+                    <button @click="openNotifications"
+                        class="flex items-center justify-center py-3 rounded-xl text-xs font-bold transition border group gap-1.5 shadow-sm"
+                        :class="dashboardView === 'notifications' 
+                            ? 'bg-indigo-500 text-white border-indigo-500 shadow-md shadow-indigo-200' 
+                            : 'bg-white text-gray-500 border-gray-200 hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200'">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9">
+                            </path>
+                        </svg>
+                        <span>通知</span>
+                    </button>
+
+                    <!-- Add Button: Primary/Green Theme -->
+                    <button @click="openAddMonitor"
+                        class="flex items-center justify-center py-3 rounded-xl text-xs font-bold transition border group gap-1.5 shadow-sm"
+                        :class="dashboardView === 'form' && !isEditing
+                            ? 'bg-emerald-500 text-white border-emerald-500 shadow-md shadow-emerald-200' 
+                            : 'bg-white text-gray-500 border-gray-200 hover:bg-emerald-50 hover:text-emerald-600 hover:border-emerald-200'">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4">
+                            </path>
+                        </svg>
+                        <span>添加</span>
+                    </button>
+                </div>
+
+                <div class="relative">
+                    <span class="absolute inset-y-0 left-3 flex items-center text-gray-400">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                        </svg>
+                    </span>
+                    <input x-model="searchText" type="text" placeholder="搜索..."
+                        class="w-full pl-9 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition">
+                </div>
+            </div>
+
+            <div class="flex-1 overflow-y-auto border-t border-gray-100">
+                <template x-for="monitor in filteredMonitors" :key="monitor.id">
+                    <div @click="selectMonitor(monitor)"
+                        class="px-4 py-4 flex items-center justify-between cursor-pointer border-b border-gray-50 transition-colors group"
+                        :class="currentMonitor && currentMonitor.id === monitor.id ? 'bg-primary/5 border-l-4 border-l-primary' : 'hover:bg-gray-50'">
+                        <div class="flex items-center gap-3 min-w-0">
+                            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 text-white"
+                                :class="statusClass(monitor.status, monitor.active)">
+                                <span x-text="monitor.type.toUpperCase()"></span>
+                            </span>
+                            <div class="flex flex-col min-w-0">
+                                <span x-text="monitor.name" class="text-sm font-semibold truncate text-gray-700"></span>
+                            </div>
+                        </div>
+                        <div class="uptime-bar-mini shrink-0">
+                            <template x-for="result in monitor.recentResults">
+                                <div class="segment-mini"
+                                    :class="result === 1 ? 'bg-primary' : (result === 0 ? 'bg-danger' : 'bg-gray-200')">
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                </template>
+                <div x-show="filteredMonitors.length === 0" class="p-8 text-center text-gray-400 text-sm">
+                    暂无监控项
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <section class="flex-1 overflow-y-auto bg-[#f8f9fb] p-8">
+
+            <!-- Chart Container - Always in DOM, controlled by x-show to prevent Chart.js errors -->
+            <div x-show="dashboardView === 'details' && currentMonitor" x-cloak class="max-w-6xl mx-auto space-y-6">
+                <!-- Top Info -->
+                <div class="flex justify-between items-start" x-show="currentMonitor">
+                    <div>
+                        <div class="flex items-center gap-3 mb-1">
+                            <h2 class="text-3xl font-bold text-gray-900" x-text="currentMonitor?.name"></h2>
+                            <span
+                                class="px-2 py-1 rounded bg-gray-100 text-gray-500 text-[11px] font-bold uppercase tracking-wider"
+                                x-text="currentMonitor?.type"></span>
+                            <span class="text-gray-300 text-2xl font-light"
+                                x-text="currentMonitor ? '#' + currentMonitor.id : ''"></span>
+                        </div>
+                        <a :href="currentMonitor?.url" target="_blank"
+                            class="text-primary hover:underline text-sm font-medium" x-text="currentMonitor?.url"></a>
+                    </div>
+                    <div class="flex gap-2">
+                        <button @click="togglePause(currentMonitor)"
+                            class="flex items-center gap-1 px-4 py-2 bg-white border border-gray-200 rounded-lg text-sm font-semibold hover:bg-gray-50 transition"
+                            :class="currentMonitor?.active ? '' : 'text-primary border-primary/30'">
+                            <!-- Pause icon (when active) -->
+                            <svg x-show="currentMonitor?.active" class="w-4 h-4" fill="currentColor"
+                                viewBox="0 0 24 24">
+                                <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"></path>
+                            </svg>
+                            <!-- Play icon (when paused) -->
+                            <svg x-show="!currentMonitor?.active" class="w-4 h-4" fill="currentColor"
+                                viewBox="0 0 24 24">
+                                <path d="M8 5v14l11-7z"></path>
+                            </svg>
+                            <span x-text="currentMonitor?.active ? '暂停' : '恢复'"></span>
+                        </button>
+                        <button @click="openEditMonitor(currentMonitor)"
+                            class="flex items-center gap-1 px-4 py-2 bg-white border border-gray-200 rounded-lg text-sm font-semibold hover:bg-gray-50 transition">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z">
+                                </path>
+                            </svg>
+                            编辑
+                        </button>
+                        <button @click="cloneMonitor(currentMonitor)"
+                            class="flex items-center gap-1 px-4 py-2 bg-white border border-gray-200 rounded-lg text-sm font-semibold hover:bg-gray-50 transition">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2">
+                                </path>
+                            </svg>
+                            克隆
+                        </button>
+                        <button @click="deleteMonitor(currentMonitor?.id)"
+                            class="flex items-center gap-1 px-4 py-2 bg-white border border-gray-200 rounded-lg text-sm font-semibold text-danger hover:bg-danger/5 transition border-danger/20">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-4v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16">
+                                </path>
+                            </svg>
+                            删除
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Uptime History (Compact) -->
+                <div class="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
+                    <div class="flex flex-col gap-5">
+                        <!-- Top Row: Bar & Status -->
+                        <div class="flex items-center gap-6">
+                            <div class="flex-1 min-w-0">
+                                <!-- Status Bar -->
+                                <div
+                                    class="flex gap-[2px] h-6 items-center w-full bg-gray-50 rounded-md overflow-hidden p-[2px] border border-gray-100">
+                                    <template x-for="result in (currentMonitor?.recentResults || [])">
+                                        <div class="flex-1 h-full rounded-[1px] transition-all hover:scale-y-110"
+                                            :class="result === 1 ? 'bg-emerald-400' : (result === 0 ? 'bg-rose-500' : 'bg-gray-200')"
+                                            :title="result === 1 ? '正常' : (result === 0 ? '中断' : '待检查')">
+                                        </div>
+                                    </template>
+                                </div>
+                                <div class="flex justify-between mt-1.5 px-0.5">
+                                    <span class="text-[10px] text-gray-400 font-bold uppercase tracking-wider"
+                                        x-text="formatDuration((currentMonitor?.interval || 60) * 30) + ' 前'"></span>
+                                    <span
+                                        class="text-[10px] text-gray-400 font-bold uppercase tracking-wider flex items-center gap-1">
+                                        <span
+                                            class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse relative top-[-1px]"
+                                            x-show="currentMonitor?.status === 1"></span>
+                                        当前
+                                    </span>
+                                </div>
+                            </div>
+
+                            <!-- Right Status Badge -->
+                            <div class="shrink-0 text-right">
+                                <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg border text-sm font-bold shadow-sm"
+                                    :class="currentMonitor?.status === 1 ? 'bg-emerald-50 border-emerald-100 text-emerald-600' : (currentMonitor?.status === 0 ? 'bg-rose-50 border-rose-100 text-rose-600' : 'bg-gray-50 border-gray-100 text-gray-500')">
+                                    <div class="w-2 h-2 rounded-full"
+                                        :class="currentMonitor?.status === 1 ? 'bg-emerald-500' : (currentMonitor?.status === 0 ? 'bg-rose-500' : 'bg-gray-400')">
+                                    </div>
+                                    <span x-text="statusText(currentMonitor?.status, currentMonitor?.active)"></span>
+                                </div>
+                                <div class="text-[10px] text-gray-400 font-medium mt-1 pr-1"
+                                    x-text="'频率: ' + formatDuration(currentMonitor?.interval || 60)"></div>
+                            </div>
+                        </div>
+
+                        <!-- Stats Grid -->
+                        <div
+                            class="grid grid-cols-2 lg:grid-cols-5 rounded-xl border border-gray-100 divide-x divide-gray-100 bg-gray-50/50">
+                            <div
+                                class="flex flex-col items-center justify-center p-3 hover:bg-white transition-colors min-h-[60px]">
+                                <span class="text-gray-400 text-[10px] font-bold uppercase tracking-wider mb-0.5"
+                                    x-text="currentMonitor?.type === 'ping' ? '平均 RTT' : '当前响应'"></span>
+                                <span class="text-base font-black text-gray-700 font-mono"
+                                    x-text="heartbeats.length > 0 ? (heartbeats[0].duration || 0) + 'ms' : '--'"></span>
+                            </div>
+                            <div
+                                class="flex flex-col items-center justify-center p-3 hover:bg-white transition-colors min-h-[60px]">
+                                <span class="text-gray-400 text-[10px] font-bold uppercase tracking-wider mb-0.5">24h
+                                    平均</span>
+                                <span class="text-base font-black text-gray-700 font-mono"
+                                    x-text="(monitorStats.avgResponse24h || 0) + 'ms'"></span>
+                            </div>
+                            <div
+                                class="flex flex-col items-center justify-center p-3 hover:bg-white transition-colors min-h-[60px]">
+                                <span class="text-gray-400 text-[10px] font-bold uppercase tracking-wider mb-0.5">1h
+                                    在线</span>
+                                <span class="text-base font-black text-gray-700 font-mono"
+                                    x-text="(monitorStats.uptime1h || 100) + '%'"></span>
+                            </div>
+                            <div
+                                class="flex flex-col items-center justify-center p-3 hover:bg-white transition-colors min-h-[60px]">
+                                <span class="text-gray-400 text-[10px] font-bold uppercase tracking-wider mb-0.5">24h
+                                    在线</span>
+                                <span class="text-base font-black text-gray-700 font-mono"
+                                    x-text="(monitorStats.uptime24h || 100) + '%'"></span>
+                            </div>
+                            <div
+                                class="flex flex-col items-center justify-center p-3 hover:bg-white transition-colors min-h-[60px]">
+                                <span class="text-gray-400 text-[10px] font-bold uppercase tracking-wider mb-0.5">7d
+                                    在线</span>
+                                <span class="text-base font-black text-gray-700 font-mono"
+                                    x-text="(monitorStats.uptime7d || 100) + '%'"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Chart - Canvas always exists in DOM -->
+                <div class="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm">
+                    <!-- 图表视图切换按钮组 -->
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="font-bold text-gray-700 text-sm">响应时间</h3>
+                        <div class="flex bg-gray-100 rounded-lg p-0.5">
+                            <button @click="switchChartView('recent')"
+                                class="px-3 py-1 text-xs font-medium rounded-md transition-all duration-200" :class="chartView === 'recent' 
+                                    ? 'bg-white text-gray-800 shadow-sm' 
+                                    : 'text-gray-500 hover:text-gray-700'">
+                                最近
+                            </button>
+                            <button @click="switchChartView('24h')"
+                                class="px-3 py-1 text-xs font-medium rounded-md transition-all duration-200" :class="chartView === '24h' 
+                                    ? 'bg-white text-gray-800 shadow-sm' 
+                                    : 'text-gray-500 hover:text-gray-700'">
+                                24小时
+                            </button>
+                            <button @click="switchChartView('7d')"
+                                class="px-3 py-1 text-xs font-medium rounded-md transition-all duration-200" :class="chartView === '7d' 
+                                    ? 'bg-white text-gray-800 shadow-sm' 
+                                    : 'text-gray-500 hover:text-gray-700'">
+                                7天
+                            </button>
+                        </div>
+                    </div>
+                    <div class="h-64 w-full" id="chartWrapper">
+                        <canvas id="responseTimeChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Event Logs -->
+                <div class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+                    <div class="p-6 border-b border-gray-50 flex items-center justify-between">
+                        <h3 class="font-bold text-gray-800">最近事件</h3>
+                        <button @click="clearLogs"
+                            class="bg-white border border-danger/30 text-danger hover:bg-danger/5 px-4 py-1.5 rounded-lg text-sm font-semibold flex items-center gap-1 transition">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-4v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16">
+                                </path>
+                            </svg>
+                            清除数据
+                        </button>
+                    </div>
+                    <table class="w-full text-left">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-6 py-3 text-xs font-bold text-gray-400 uppercase tracking-wider">状态
+                                </th>
+                                <th class="px-6 py-3 text-xs font-bold text-gray-400 uppercase tracking-wider">日期时间
+                                </th>
+                                <th class="px-6 py-3 text-xs font-bold text-gray-400 uppercase tracking-wider">消息
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-50">
+                            <template x-for="hb in heartbeats" :key="hb.time">
+                                <tr class="hover:bg-gray-50 transition-colors">
+                                    <td class="px-6 py-4">
+                                        <span class="px-2 py-1 rounded-full text-[10px] font-bold"
+                                            :class="hb.status === 1 ? 'bg-primary/10 text-primary' : 'bg-danger/10 text-danger'">
+                                            <span x-text="statusText(hb.status)"></span>
+                                        </span>
+                                    </td>
+                                    <td class="px-6 py-4 text-sm text-gray-500" x-text="hb.time"></td>
+                                    <td class="px-6 py-4 text-sm text-gray-700" x-text="hb.msg"></td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                    <div x-show="heartbeats.length === 0" class="p-12 text-center text-gray-400 text-sm">暂无日志。</div>
+                </div>
+            </div>
+
+            <!-- Form View (Add/Edit) -->
+            <template x-if="dashboardView === 'form'">
+                <div class="max-w-4xl mx-auto bg-white p-12 rounded-3xl border border-gray-100 shadow-xl">
+                    <div class="mb-10 text-center">
+                        <h2 class="text-3xl font-bold text-gray-900 mb-2" x-text="isEditing ? '编辑监控项' : '添加新监控项'"></h2>
+                        <p class="text-gray-500">配置您想要监控的服务参数</p>
+                    </div>
+                    <form @submit.prevent="saveMonitor" class="space-y-8">
+                        <!-- Basic Setup -->
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                            <div class="space-y-2">
+                                <label
+                                    class="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">显示名称</label>
+                                <input x-model="monitorForm.name"
+                                    class="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition"
+                                    type="text" required placeholder="如：我的博客">
+                            </div>
+                            <div class="space-y-2">
+                                <label
+                                    class="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">监控类型</label>
+                                <select x-model="monitorForm.type"
+                                    class="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition">
+                                    <option value="http">HTTP(s)</option>
+                                    <option value="ping">Ping</option>
+                                    <option value="tcp">TCP 端口</option>
+                                    <option value="dns">DNS</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="space-y-2">
+                            <label class="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">URL /
+                                主机名</label>
+                            <input x-model="monitorForm.url"
+                                class="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition"
+                                type="text" required placeholder="https://example.com">
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                            <div class="space-y-2">
+                                <label class="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">检查间隔
+                                    (秒)</label>
+                                <input x-model.number="monitorForm.interval"
+                                    class="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition"
+                                    type="number" min="20">
+                            </div>
+                            <div class="space-y-2">
+                                <label class="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">超时时间
+                                    (秒)</label>
+                                <input x-model.number="monitorForm.timeout"
+                                    class="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition"
+                                    type="number" min="1">
+                            </div>
+                        </div>
+
+                        <!-- Advanced Toggle (Only show for HTTP type) -->
+                        <div x-show="monitorForm.type === 'http'" class="pt-4 border-t border-gray-100">
+                            <button @click="showAdvanced = !showAdvanced" type="button"
+                                class="flex items-center gap-2 text-sm font-bold text-gray-500 hover:text-primary transition">
+                                <svg class="w-4 h-4 transition-transform" :class="showAdvanced ? 'rotate-180' : ''"
+                                    fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M19 9l-7 7-7-7"></path>
+                                </svg>
+                                高级设置
+                            </button>
+                        </div>
+
+                        <!-- Advanced Fields (Only for HTTP type) -->
+                        <div x-show="showAdvanced && monitorForm.type === 'http'" x-collapse x-cloak
+                            class="space-y-8 pt-4">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                <div class="space-y-2">
+                                    <label class="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">HTTP
+                                        方法</label>
+                                    <select x-model="monitorForm.method"
+                                        class="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition">
+                                        <option value="GET">GET</option>
+                                        <option value="POST">POST</option>
+                                        <option value="PUT">PUT</option>
+                                        <option value="PATCH">PATCH</option>
+                                        <option value="DELETE">DELETE</option>
+                                        <option value="HEAD">HEAD</option>
+                                        <option value="OPTIONS">OPTIONS</option>
+                                    </select>
+                                </div>
+                                <div class="space-y-2">
+                                    <label
+                                        class="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">预期状态码</label>
+                                    <input x-model.number="monitorForm.expected_status"
+                                        class="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition"
+                                        type="number" placeholder="0 (默认 2xx)">
+                                </div>
+                            </div>
+
+                            <div class="space-y-2">
+                                <label class="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">请求头
+                                    (Headers JSON)</label>
+                                <textarea x-model="monitorForm.headers" rows="3"
+                                    class="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition font-mono text-sm"
+                                    placeholder='{"Authorization": "Bearer ...", "X-Custom": "value"}'></textarea>
+                            </div>
+
+                            <!-- Body field: Only show for methods that support body (not GET, HEAD, OPTIONS) -->
+                            <div x-show="!['GET', 'HEAD', 'OPTIONS'].includes(monitorForm.method)" class="space-y-2">
+                                <label class="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">请求体
+                                    (Body)</label>
+                                <textarea x-model="monitorForm.body" rows="3"
+                                    class="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition font-mono text-sm"
+                                    placeholder='{"key": "value"}'></textarea>
+                                <p class="text-[10px] text-gray-400 mt-1">仅适用于 POST/PUT/PATCH/DELETE 等带 Body 的请求</p>
+                            </div>
+
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                <!-- Response Regex: Only show for methods that have response body (not HEAD) -->
+                                <div x-show="monitorForm.method !== 'HEAD'" class="space-y-2">
+                                    <label
+                                        class="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">响应正则验证</label>
+                                    <input x-model="monitorForm.response_regex"
+                                        class="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition"
+                                        type="text" placeholder="^OK$">
+                                </div>
+                                <div class="flex items-center gap-3 pt-8">
+                                    <input x-model="monitorForm.follow_redirects" type="checkbox" id="follow_redir"
+                                        class="w-5 h-5 rounded border-gray-300 text-primary focus:ring-primary">
+                                    <label for="follow_redir"
+                                        class="text-sm font-bold text-gray-600 cursor-pointer">跟随重定向</label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Buttons -->
+                        <div class="flex justify-end gap-4 pt-6 border-t border-gray-100">
+                            <button @click="dashboardView = 'details'" type="button"
+                                class="px-8 py-3 rounded-xl text-gray-500 font-bold hover:bg-gray-50 transition">取消</button>
+                            <button type="submit"
+                                class="px-12 py-3 bg-primary text-white rounded-xl font-bold shadow-lg shadow-primary/20 hover:opacity-90 transition transform active:scale-[0.98]">
+                                <span x-text="isEditing ? '保存修改' : '立即添加'"></span>
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </template>
+
+            <!-- Overview View -->
+            <template x-if="dashboardView === 'overview'">
+                <div class="max-w-6xl mx-auto space-y-8">
+                    <div class="flex flex-col gap-2">
+                        <h2 class="text-3xl font-bold text-gray-900">系统总览</h2>
+                        <p class="text-gray-500">所有监控项的实时运行状态汇总</p>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                        <div
+                            class="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm flex flex-col items-center justify-center text-center">
+                            <span class="text-gray-400 text-xs font-bold uppercase tracking-widest mb-3">总监控项</span>
+                            <span class="text-4xl font-black text-dark" x-text="globalStats.total"></span>
+                        </div>
+                        <div
+                            class="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm flex flex-col items-center justify-center text-center">
+                            <span class="text-primary text-xs font-bold uppercase tracking-widest mb-3">运行中 (正常)</span>
+                            <span class="text-4xl font-black text-primary" x-text="globalStats.up"></span>
+                        </div>
+                        <div
+                            class="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm flex flex-col items-center justify-center text-center">
+                            <span class="text-danger text-xs font-bold uppercase tracking-widest mb-3">运行中 (异常)</span>
+                            <span class="text-4xl font-black text-danger" x-text="globalStats.down"></span>
+                        </div>
+                        <div
+                            class="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm flex flex-col items-center justify-center text-center">
+                            <span class="text-gray-400 text-xs font-bold uppercase tracking-widest mb-3">已暂停</span>
+                            <span class="text-4xl font-black text-gray-500" x-text="globalStats.paused"></span>
+                        </div>
+                    </div>
+
+                    <div x-show="globalStats.total === 0"
+                        class="flex flex-col items-center justify-center py-20 text-gray-400 space-y-4">
+                        <div
+                            class="w-24 h-24 bg-white rounded-[2rem] shadow-sm flex items-center justify-center border border-gray-100 mb-4">
+                            <svg class="w-12 h-12 text-gray-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M12 4v16m8-8H4"></path>
+                            </svg>
+                        </div>
+                        <h3 class="text-xl font-bold text-gray-500">还没有任何监控项</h3>
+                        <p class="text-gray-400">点击下方按钮开始您的第一个监控任务。</p>
+                        <button @click="openAddMonitor"
+                            class="bg-primary text-white px-8 py-3 rounded-xl font-bold shadow-lg shadow-primary/20 hover:opacity-90 transition">添加监控项</button>
+                    </div>
+                </div>
+            </template>
+
+            <!-- Notification View -->
+            <template x-if="dashboardView === 'notifications'">
+                <div class="max-w-5xl mx-auto space-y-8">
+                    <!-- Header -->
+                    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                        <div>
+                            <h2 class="text-3xl font-bold text-gray-900">通知设置</h2>
+                            <p class="text-gray-500 mt-1 text-sm">管理系统报警规则与定期报告</p>
+                        </div>
+                    </div>
+
+                    <div class="flex flex-col gap-8">
+
+                        <!-- Schedule Block (First) -->
+                        <div
+                            class="bg-white p-6 md:p-8 rounded-3xl border border-gray-100 shadow-sm relative overflow-hidden">
+                            <div
+                                class="absolute top-0 right-0 w-32 h-32 bg-indigo-50 rounded-bl-full -mr-8 -mt-8 opacity-50 pointer-events-none">
+                            </div>
+
+                            <div class="flex justify-between items-center mb-6 relative">
+                                <div class="flex items-center gap-3">
+                                    <div
+                                        class="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center shadow-sm shadow-indigo-100">
+                                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                        </svg>
+                                    </div>
+                                    <div>
+                                        <h3 class="font-bold text-gray-800 text-lg">定时通知</h3>
+                                        <p class="text-gray-400 text-xs font-medium">每天定时发送系统运行状态统计</p>
+                                    </div>
+                                </div>
+                                <button @click="openAddSchedule"
+                                    class="bg-white border border-indigo-100 text-indigo-600 hover:bg-indigo-50 hover:border-indigo-200 px-4 py-2 rounded-xl text-sm font-bold transition flex items-center gap-2 shadow-sm">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            d="M12 4v16m8-8H4"></path>
+                                    </svg>
+                                    添加规则
+                                </button>
+                            </div>
+
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <template x-for="n in scheduledNotifications" :key="n.id">
+                                    <div class="flex items-center justify-between p-4 rounded-2xl border transition-all duration-300 hover:shadow-md group"
+                                        :class="n.active ? 'bg-white border-indigo-100 shadow-sm' : 'bg-gray-50 border-gray-100 opacity-70'">
+                                        <div class="flex items-center gap-4">
+                                            <!-- Switch -->
+                                            <button @click="toggleNotification(n)"
+                                                class="w-10 h-6 rounded-full relative transition-colors duration-200 focus:outline-none shrink-0"
+                                                :class="n.active ? 'bg-indigo-500 shadow-inner' : 'bg-gray-200'">
+                                                <div class="w-4 h-4 bg-white rounded-full absolute top-1 transition-all duration-200 shadow-sm"
+                                                    :class="n.active ? 'left-5' : 'left-1'"></div>
+                                            </button>
+
+                                            <div>
+                                                <div class="font-bold text-gray-700 text-sm" x-text="n.name"></div>
+                                                <div class="flex items-center gap-2 mt-1.5 h-5">
+                                                    <span
+                                                        class="flex items-center gap-1 text-[10px] font-mono bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded border border-gray-200">
+                                                        <svg class="w-3 h-3 text-gray-400" fill="none"
+                                                            stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path stroke-linecap="round" stroke-linejoin="round"
+                                                                stroke-width="2"
+                                                                d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                                        </svg>
+                                                        <span x-text="n.cfg.time"></span>
+                                                    </span>
+                                                    <span class="text-[10px] text-gray-400 truncate max-w-[150px]"
+                                                        x-text="n.cfg.email"></span>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div
+                                            class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <button @click="openEditNotification(n)"
+                                                class="text-gray-300 hover:text-indigo-600 p-2 transition-colors">
+                                                <svg class="w-4 h-4" fill="none" stroke="currentColor"
+                                                    viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                                        stroke-width="2"
+                                                        d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z">
+                                                    </path>
+                                                </svg>
+                                            </button>
+                                            <button @click="deleteNotification(n.id)"
+                                                class="text-gray-300 hover:text-danger p-2 transition-colors">
+                                                <svg class="w-4 h-4" fill="none" stroke="currentColor"
+                                                    viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                                        stroke-width="2"
+                                                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-4v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16">
+                                                    </path>
+                                                </svg>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </template>
+                            </div>
+                            <div x-show="scheduledNotifications.length === 0"
+                                class="flex flex-col items-center justify-center py-10 text-gray-400 border-2 border-dashed border-gray-100 rounded-2xl mt-2 bg-gray-50/50">
+                                <p class="text-sm font-medium">暂无定时规则</p>
+                                <p class="text-xs mt-1 text-gray-300">添加第一条规则来接收每日日报</p>
+                            </div>
+                        </div>
+
+                        <!-- Trigger Block (Second) -->
+                        <div
+                            class="bg-white p-6 md:p-8 rounded-3xl border border-gray-100 shadow-sm relative overflow-hidden">
+                            <div
+                                class="absolute top-0 right-0 w-32 h-32 bg-amber-50 rounded-bl-full -mr-8 -mt-8 opacity-50 pointer-events-none">
+                            </div>
+
+                            <div class="flex justify-between items-center mb-6 relative">
+                                <div class="flex items-center gap-3">
+                                    <div
+                                        class="w-10 h-10 bg-amber-50 text-amber-600 rounded-xl flex items-center justify-center shadow-sm shadow-amber-100">
+                                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9">
+                                            </path>
+                                        </svg>
+                                    </div>
+                                    <div>
+                                        <h3 class="font-bold text-gray-800 text-lg">故障报警</h3>
+                                        <p class="text-gray-400 text-xs font-medium">监控状态变化实时通知</p>
+                                    </div>
+                                </div>
+                                <button @click="openAddTrigger"
+                                    class="bg-white border border-amber-100 text-amber-600 hover:bg-amber-50 hover:border-amber-200 px-4 py-2 rounded-xl text-sm font-bold transition flex items-center gap-2 shadow-sm">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            d="M12 4v16m8-8H4"></path>
+                                    </svg>
+                                    添加规则
+                                </button>
+                            </div>
+
+                            <div class="space-y-3">
+                                <template x-for="n in triggerNotifications" :key="n.id">
+                                    <div class="flex items-center justify-between p-4 rounded-2xl border transition-all duration-300 hover:shadow-md group"
+                                        :class="n.active ? 'bg-white border-amber-100 shadow-sm' : 'bg-gray-50 border-gray-100 opacity-70'">
+                                        <div class="flex items-center gap-5 flex-1 min-w-0">
+                                            <!-- Switch -->
+                                            <button @click="toggleNotification(n)"
+                                                class="w-10 h-6 rounded-full relative transition-colors duration-200 focus:outline-none shrink-0"
+                                                :class="n.active ? 'bg-amber-500 shadow-inner' : 'bg-gray-200'">
+                                                <div class="w-4 h-4 bg-white rounded-full absolute top-1 transition-all duration-200 shadow-sm"
+                                                    :class="n.active ? 'left-5' : 'left-1'"></div>
+                                            </button>
+
+                                            <div class="flex-1 grid grid-cols-1 sm:grid-cols-12 gap-4 items-center">
+                                                <div class="sm:col-span-4 font-bold text-gray-700 text-sm truncate"
+                                                    x-text="n.name"></div>
+
+                                                <div class="sm:col-span-5 flex items-center gap-2 text-xs">
+                                                    <span
+                                                        class="px-2 py-1 rounded bg-gray-100 border border-gray-200 text-gray-600 font-medium truncate max-w-[120px]"
+                                                        x-text="n.cfg.monitor_name === '*' ? '所有监控项' : n.cfg.monitor_name"
+                                                        :title="n.cfg.monitor_name"></span>
+                                                    <span class="text-gray-300">→</span>
+                                                    <span
+                                                        x-text="n.cfg.on_status === 'down' ? '宕机 (Down)' : (n.cfg.on_status === 'up' ? '恢复 (Up)' : '状态变更')"
+                                                        class="uppercase font-bold px-2 py-1 rounded text-[10px] tracking-wider border"
+                                                        :class="n.cfg.on_status === 'down' ? 'bg-red-50 text-red-600 border-red-100' : (n.cfg.on_status === 'up' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-blue-50 text-blue-600 border-blue-100')">
+                                                    </span>
+                                                </div>
+
+                                                <div class="sm:col-span-3 text-[10px] text-gray-400 sm:text-right truncate"
+                                                    x-text="n.cfg.email" :title="n.cfg.email"></div>
+                                            </div>
+                                        </div>
+
+                                        <div
+                                            class="flex items-center gap-1 ml-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <button @click="openEditNotification(n)"
+                                                class="text-gray-300 hover:text-amber-600 p-2 transition-colors">
+                                                <svg class="w-4 h-4" fill="none" stroke="currentColor"
+                                                    viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                                        stroke-width="2"
+                                                        d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z">
+                                                    </path>
+                                                </svg>
+                                            </button>
+                                            <button @click="deleteNotification(n.id)"
+                                                class="text-gray-300 hover:text-danger p-2 transition-colors">
+                                                <svg class="w-4 h-4" fill="none" stroke="currentColor"
+                                                    viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                                        stroke-width="2"
+                                                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-4v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16">
+                                                    </path>
+                                                </svg>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </template>
+                            </div>
+                            <div x-show="triggerNotifications.length === 0"
+                                class="flex flex-col items-center justify-center py-10 text-gray-400 border-2 border-dashed border-gray-100 rounded-2xl mt-2 bg-gray-50/50">
+                                <p class="text-sm font-medium">暂无报警规则</p>
+                                <p class="text-xs mt-1 text-gray-300">添加规则以在服务异常时接收通知</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </template>
+
+            <!-- Empty State Fallback -->
+            <template x-if="dashboardView === 'details' && !currentMonitor">
+                <div class="h-full flex flex-col items-center justify-center text-gray-400 space-y-4">
+                    <div
+                        class="w-24 h-24 bg-white rounded-[2rem] shadow-sm flex items-center justify-center border border-gray-100 mb-4">
+                        <svg class="w-12 h-12 text-gray-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z">
+                            </path>
+                        </svg>
+                    </div>
+                    <h3 class="text-xl font-bold text-gray-500">请选择一个监控项</h3>
+                    <p class="text-gray-400">从左侧列表选择或直接添加一个新的监控目标。</p>
+                    <button @click="showOverview"
+                        class="bg-primary text-white px-8 py-3 rounded-xl font-bold shadow-lg shadow-primary/20 hover:opacity-90 transition">查看总览</button>
+                </div>
+            </template>
+
+        </section>
+    </main>
+
+    <!-- Initial Page Check -->
+    <template x-if="page === 'loading'">
+        <div class="fixed inset-0 bg-white z-[100] flex items-center justify-center">
+            <div class="flex flex-col items-center">
+                <div class="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+                <p class="mt-4 text-gray-500 font-medium">正在启动 PingGo...</p>
+            </div>
+        </div>
+    </template>
+
+    <!-- Login/Setup Layers... (Skipped for brevity, using existing logic but styled) -->
+    <!-- I'll keep the existing logic for Login/Setup but wrap it in the new design if needed -->
+    <template x-if="page === 'login' || page === 'setup'">
+        <div class="fixed inset-0 bg-gray-50 z-[100] flex items-center justify-center p-6">
+            <div class="bg-white p-12 rounded-[2.5rem] shadow-2xl w-full max-w-md border border-gray-100">
+                <div class="flex flex-col items-center mb-10 text-center">
+                    <div
+                        class="w-16 h-16 bg-primary rounded-2xl flex items-center justify-center shadow-lg shadow-primary/20 mb-6">
+                        <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                        </svg>
+                    </div>
+                    <h2 class="text-3xl font-black text-gray-900 tracking-tight"
+                        x-text="page === 'login' ? '欢迎回来' : '初始化 PingGo'"></h2>
+                    <p class="text-gray-500 mt-2 font-medium" x-text="page === 'login' ? '请登录以管理您的监控项' : '创建您的管理员账号'">
+                    </p>
+                </div>
+
+                <!-- Login Form -->
+                <template x-if="page === 'login'">
+                    <form @submit.prevent="doLogin" class="space-y-6" autocomplete="off">
+                        <div class="space-y-2">
+                            <label
+                                class="block text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">用户名</label>
+                            <input x-model="loginForm.username"
+                                class="w-full bg-gray-50 border border-transparent rounded-2xl py-4 px-5 text-gray-900 focus:bg-white focus:border-primary/20 transition-all outline-none"
+                                type="text" required placeholder="admin" autocomplete="off"
+                                name="username_login_pinggo">
+                        </div>
+                        <div class="space-y-2">
+                            <label
+                                class="block text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">密码</label>
+                            <input x-model="loginForm.password"
+                                class="w-full bg-gray-50 border border-transparent rounded-2xl py-4 px-5 text-gray-900 focus:bg-white focus:border-primary/20 transition-all outline-none"
+                                type="password" required placeholder="••••••••" autocomplete="new-password"
+                                name="password_login_pinggo">
+                        </div>
+                        <button
+                            class="w-full bg-primary hover:opacity-90 text-white font-bold py-4 rounded-2xl transition-all shadow-lg shadow-primary/25 active:scale-[0.98]"
+                            type="submit">
+                            登录
+                        </button>
+                    </form>
+                </template>
+
+                <!-- Setup Form -->
+                <template x-if="page === 'setup'">
+                    <form @submit.prevent="doSetup" class="space-y-5" autocomplete="off">
+                        <div class="space-y-2">
+                            <label
+                                class="block text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">用户名</label>
+                            <input x-model="setupForm.username"
+                                class="w-full bg-gray-50 border border-transparent rounded-2xl py-4 px-5 text-gray-900 focus:bg-white focus:border-primary/20 transition-all outline-none"
+                                type="text" required placeholder="admin" autocomplete="off"
+                                name="username_setup_pinggo">
+                        </div>
+                        <div class="space-y-2">
+                            <label
+                                class="block text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">密码</label>
+                            <input x-model="setupForm.password"
+                                class="w-full bg-gray-50 border border-transparent rounded-2xl py-4 px-5 text-gray-900 focus:bg-white focus:border-primary/20 transition-all outline-none"
+                                type="password" required placeholder="••••••••" autocomplete="new-password"
+                                name="password_setup_pinggo">
+                        </div>
+                        <div class="space-y-2">
+                            <label
+                                class="block text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">确认密码</label>
+                            <input x-model="setupForm.confirmPassword"
+                                class="w-full bg-gray-50 border border-transparent rounded-2xl py-4 px-5 text-gray-900 focus:bg-white focus:border-primary/20 transition-all outline-none"
+                                type="password" required placeholder="••••••••" autocomplete="new-password"
+                                name="password_confirm_pinggo">
+                        </div>
+                        <button
+                            class="w-full bg-primary hover:opacity-90 text-white font-bold py-4 rounded-2xl transition-all shadow-lg shadow-primary/25 active:scale-[0.98]"
+                            type="submit">
+                            立即开始
+                        </button>
+                    </form>
+                </template>
+            </div>
+        </div>
+    </template>
+
+    <!-- Notification Modal -->
+    <div x-show="showNotifModal" style="display: none;"
+        class="fixed inset-0 z-[150] flex items-center justify-center px-4" x-transition.opacity x-cloak>
+        <div class="absolute inset-0 bg-black/40 backdrop-blur-sm" @click="showNotifModal = false"></div>
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden relative transform transition-all border border-gray-100 p-8 space-y-6"
+            x-transition:enter="transition ease-out duration-200"
+            x-transition:enter-start="opacity-0 scale-95 translate-y-2"
+            x-transition:enter-end="opacity-100 scale-100 translate-y-0"
+            x-transition:leave="transition ease-in duration-100"
+            x-transition:leave-start="opacity-100 scale-100 translate-y-0"
+            x-transition:leave-end="opacity-0 scale-95 translate-y-2">
+
+            <div class="flex justify-between items-center">
+                <h3 class="text-2xl font-bold text-gray-900"
+                    x-text="isEditingNotif ? (notifForm.type === 'trigger' ? '编辑报警规则' : '编辑定时通知') : (notifForm.type === 'trigger' ? '添加报警规则' : '添加定时通知')">
+                </h3>
+                <button @click="showNotifModal = false" class="text-gray-400 hover:text-gray-600 transition">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12">
+                        </path>
+                    </svg>
+                </button>
+            </div>
+
+            <form @submit.prevent="saveNotification" class="space-y-6">
+
+                <!-- Common Fields -->
+                <div class="space-y-2">
+                    <label class="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">规则名称</label>
+                    <input x-model="notifForm.name"
+                        class="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition"
+                        type="text" :placeholder="notifForm.type === 'trigger' ? '例如：全站宕机报警' : '例如：每日早安日报'">
+                </div>
+
+                <div class="space-y-2">
+                    <label class="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">接收邮箱</label>
+                    <input x-model="notifForm.email"
+                        class="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition"
+                        type="email" required placeholder="yourname@example.com">
+                    <p class="text-[10px] text-gray-400 pl-1">多个邮箱请用英文逗号分隔</p>
+                </div>
+
+                <!-- Trigger Specific Fields -->
+                <template x-if="notifForm.type === 'trigger'">
+                    <div class="space-y-6">
+                        <div class="space-y-2">
+                            <label class="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">监控对象</label>
+                            <select x-model="notifForm.monitorName"
+                                class="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition">
+                                <option value="*">所有监控项 (*)</option>
+                                <template x-for="m in monitors" :key="m.id">
+                                    <option :value="m.name" x-text="m.name"></option>
+                                </template>
+                            </select>
+                        </div>
+                        <div class="space-y-2">
+                            <label class="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">触发条件</label>
+                            <div class="grid grid-cols-3 gap-3">
+                                <label class="cursor-pointer">
+                                    <input type="radio" x-model="notifForm.onStatus" value="down" class="peer sr-only">
+                                    <div
+                                        class="py-2 text-center rounded-lg border border-gray-200 peer-checked:bg-rose-50 peer-checked:border-rose-200 peer-checked:text-rose-600 transition text-sm font-bold text-gray-500 hover:bg-gray-50">
+                                        宕机 (Down)
+                                    </div>
+                                </label>
+                                <label class="cursor-pointer">
+                                    <input type="radio" x-model="notifForm.onStatus" value="up" class="peer sr-only">
+                                    <div
+                                        class="py-2 text-center rounded-lg border border-gray-200 peer-checked:bg-emerald-50 peer-checked:border-emerald-200 peer-checked:text-emerald-600 transition text-sm font-bold text-gray-500 hover:bg-gray-50">
+                                        恢复 (Up)
+                                    </div>
+                                </label>
+                                <label class="cursor-pointer">
+                                    <input type="radio" x-model="notifForm.onStatus" value="change"
+                                        class="peer sr-only">
+                                    <div
+                                        class="py-2 text-center rounded-lg border border-gray-200 peer-checked:bg-blue-50 peer-checked:border-blue-200 peer-checked:text-blue-600 transition text-sm font-bold text-gray-500 hover:bg-gray-50">
+                                        状态变更
+                                    </div>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+
+                <!-- Schedule Specific Fields -->
+                <template x-if="notifForm.type === 'schedule'">
+                    <div class="space-y-2">
+                        <label class="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">发送时间 (每天)</label>
+                        <input x-model="notifForm.time"
+                            class="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition"
+                            type="time">
+                    </div>
+                </template>
+
+                <div class="flex justify-end gap-3 pt-4">
+                    <button type="button" @click="showNotifModal = false"
+                        class="px-6 py-2.5 rounded-xl text-gray-500 font-bold hover:bg-gray-50 transition">取消</button>
+                    <button type="submit"
+                        class="px-8 py-2.5 bg-primary text-white rounded-xl font-bold shadow-lg shadow-primary/20 hover:opacity-90 transition transform active:scale-[0.98]">
+                        <span x-text="isEditingNotif ? '保存修改' : '保存规则'"></span>
+                    </button>
+                </div>
+
+            </form>
+        </div>
+    </div>
+    <!-- Global Message Modal (Alert/Confirm) -->
+    <div x-show="msgBox.show" style="display: none;" class="fixed inset-0 z-[200] flex items-center justify-center px-4"
+        x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0"
+        x-transition:enter-end="opacity-100" x-transition:leave="transition ease-in duration-100"
+        x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0" x-cloak>
+
+        <!-- Backdrop -->
+        <div class="absolute inset-0 bg-black/40 backdrop-blur-sm" @click="if(msgBox.type !== 'confirm') closeMsgBox()">
+        </div>
+
+        <!-- Dialog -->
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden relative transform transition-all border border-gray-100"
+            x-transition:enter="transition ease-out duration-200"
+            x-transition:enter-start="opacity-0 scale-95 translate-y-2"
+            x-transition:enter-end="opacity-100 scale-100 translate-y-0"
+            x-transition:leave="transition ease-in duration-100"
+            x-transition:leave-start="opacity-100 scale-100 translate-y-0"
+            x-transition:leave-end="opacity-0 scale-95 translate-y-2">
+
+            <div class="p-8 text-center">
+                <!-- Icon -->
+                <div class="mx-auto flex items-center justify-center w-14 h-14 rounded-full mb-5" :class="{
+                        'bg-rose-100 text-rose-500': msgBox.type === 'error' || (msgBox.type === 'confirm' && msgBox.isDestructive),
+                        'bg-emerald-100 text-emerald-500': msgBox.type === 'success',
+                        'bg-blue-100 text-blue-500': msgBox.type === 'info',
+                        'bg-amber-100 text-amber-500': msgBox.type === 'warning' || (msgBox.type === 'confirm' && !msgBox.isDestructive)
+                     }">
+                    <!-- Error/Destructive -->
+                    <svg x-show="msgBox.type === 'error' || (msgBox.type === 'confirm' && msgBox.isDestructive)"
+                        class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z">
+                        </path>
+                    </svg>
+                    <!-- Success -->
+                    <svg x-show="msgBox.type === 'success'" class="w-7 h-7" fill="none" stroke="currentColor"
+                        viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                    </svg>
+                    <!-- Info -->
+                    <svg x-show="msgBox.type === 'info'" class="w-7 h-7" fill="none" stroke="currentColor"
+                        viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    <!-- Question/Warning -->
+                    <svg x-show="msgBox.type === 'warning' || (msgBox.type === 'confirm' && !msgBox.isDestructive)"
+                        class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z">
+                        </path>
+                    </svg>
+                </div>
+
+                <h3 class="text-xl font-black text-gray-900 mb-2" x-text="msgBox.title"></h3>
+                <p class="text-sm text-gray-500 leading-relaxed" x-text="msgBox.message"></p>
+            </div>
+
+            <!-- Buttons -->
+            <div class="bg-gray-50/80 px-8 py-5 flex gap-4 justify-center backdrop-blur-sm">
+                <template x-if="msgBox.type === 'confirm'">
+                    <button @click="closeMsgBox()"
+                        class="flex-1 px-5 py-2.5 bg-white text-gray-600 font-bold rounded-xl border border-gray-200 hover:bg-gray-100 transition text-sm shadow-sm">
+                        取消
+                    </button>
+                </template>
+                <button @click="confirmMsgBox()"
+                    class="flex-1 px-5 py-2.5 text-white font-bold rounded-xl shadow-lg transition text-sm transform active:scale-95 flex items-center justify-center gap-2"
+                    :class="{
+                        'bg-rose-500 shadow-rose-200 hover:bg-rose-600': msgBox.type === 'error' || (msgBox.type === 'confirm' && msgBox.isDestructive),
+                        'bg-emerald-500 shadow-emerald-200 hover:bg-emerald-600': msgBox.type === 'success',
+                        'bg-primary shadow-primary/20 hover:opacity-90': msgBox.type === 'info' || msgBox.type === 'warning' || (msgBox.type === 'confirm' && !msgBox.isDestructive)
+                    }">
+                    <span x-text="msgBox.confirmText || '确定'"></span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,12 @@
+server:
+  port: 37374
+notification:
+  resend_api_key: "YOUR_RESEND_API_KEY"
+  email: "YOUR_EMAIL@example.com"
+
+# 数据保留配置 - 分层存储策略
+# 原始数据保留较短时间，聚合数据保留较长时间，大幅节省存储空间
+retention:
+  raw_hours: 24      # 原始心跳数据保留 24 小时
+  hourly_days: 7     # 小时级聚合数据保留 7 天
+  daily_days: 365    # 日级聚合数据保留 1 年
