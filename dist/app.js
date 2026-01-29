@@ -11,8 +11,8 @@ function app() {
         isEditingNotif: false,
         searchText: '',
         setupForm: { username: '', password: '', confirmPassword: '' },
-        chart: null,
-        chartInitTimeout: null,
+        // ❌ 移除：不在 Alpine 数据中存储 chart，避免 Proxy 包装
+        // chart 实例将直接存储在 canvas DOM 元素上
         // 图表视图模式：'recent'（最近30条原始数据）, '24h'（24小时聚合）, '7d'（7天聚合）
         chartView: 'recent',
         // 图表聚合数据缓存
@@ -472,24 +472,20 @@ function app() {
             });
         },
 
-        // Safely destroy chart and reset canvas to avoid context issues
+        // 安全销毁图表并重置 canvas
         destroyChart() {
-            if (this.chartInitTimeout) {
-                clearTimeout(this.chartInitTimeout);
-                this.chartInitTimeout = null;
-            }
-
-            if (this.chart) {
+            const canvas = document.getElementById('responseTimeChart');
+            if (canvas && canvas._chartInstance) {
                 try {
-                    this.chart.stop();
-                    this.chart.destroy();
+                    canvas._chartInstance.stop();
+                    canvas._chartInstance.destroy();
                 } catch (e) {
                     console.warn('Chart cleanup warning:', e);
                 }
-                this.chart = null;
+                canvas._chartInstance = null;
             }
 
-            // Brute force: Recreate the canvas element to ensure a clean slate
+            // 重新创建 canvas 元素确保干净状态
             const wrapper = document.getElementById('chartWrapper');
             if (wrapper) {
                 wrapper.innerHTML = '<canvas id="responseTimeChart"></canvas>';
@@ -626,11 +622,19 @@ function app() {
                 return;
             }
 
-            const labels = [...this.heartbeats].map(h => h.time).reverse();
-            const data = [...this.heartbeats].map(h => h.duration || 0).reverse();
+            // ✅ 修复：使用 JSON 深度克隆彻底解除 Proxy，避免 toString() 循环
+            // 创建完全独立的纯数据数组
+            const plainData = JSON.parse(JSON.stringify(this.heartbeats.map(h => ({
+                time: h.time,
+                duration: h.duration || 0
+            }))));
+
+            const labels = plainData.map(h => h.time).reverse();
+            const data = plainData.map(h => h.duration).reverse();
 
             try {
-                this.chart = new Chart(canvas, {
+                // ✅ 关键修复：将 Chart 实例存储在 canvas DOM 元素上，避免 Alpine Proxy 包装
+                canvas._chartInstance = new Chart(canvas, {
                     type: 'line',
                     data: {
                         labels: labels,
@@ -648,7 +652,6 @@ function app() {
                     options: {
                         responsive: true,
                         maintainAspectRatio: false,
-                        // Disable animations to prevent requestAnimationFrame issues
                         animation: false,
                         plugins: {
                             legend: { display: false }
@@ -664,26 +667,25 @@ function app() {
                     }
                 });
             } catch (e) {
-                console.warn('Error creating chart:', e);
-                this.chart = null;
+                console.error('Error creating chart:', e);
+                canvas._chartInstance = null;
             }
         },
 
 
         updateChart() {
-            // 如果当前视图不是 'recent'，不需要用原始数据更新
             if (this.chartView !== 'recent') {
                 return;
             }
 
-            if (!this.chart) {
-                // If chart doesn't exist, try to initialize it
+            const canvas = document.getElementById('responseTimeChart');
+            if (!canvas || !canvas._chartInstance) {
                 this.$nextTick(() => this.initChart());
                 return;
             }
 
-            // Check if chart canvas is still connected
-            if (!this.chart.canvas || !this.chart.canvas.isConnected) {
+            // 检查 canvas 是否仍然连接
+            if (!canvas.isConnected) {
                 console.warn('Chart canvas disconnected, reinitializing...');
                 this.destroyChart();
                 this.$nextTick(() => this.initChart());
@@ -691,15 +693,21 @@ function app() {
             }
 
             try {
-                const labels = [...this.heartbeats].map(h => h.time).reverse();
-                const data = [...this.heartbeats].map(h => h.duration || 0).reverse();
-                this.chart.data.labels = labels;
-                this.chart.data.datasets[0].data = data;
-                // Use 'none' mode to skip animation during update
-                this.chart.update('none');
+                // ✅ 使用 JSON 深度克隆彻底解除 Proxy
+                const plainData = JSON.parse(JSON.stringify(this.heartbeats.map(h => ({
+                    time: h.time,
+                    duration: h.duration || 0
+                }))));
+
+                const labels = plainData.map(h => h.time).reverse();
+                const data = plainData.map(h => h.duration).reverse();
+
+                // ✅ 从 canvas 获取 Chart 实例，避免 Alpine Proxy
+                canvas._chartInstance.data.labels = labels;
+                canvas._chartInstance.data.datasets[0].data = data;
+                canvas._chartInstance.update('none');
             } catch (e) {
-                console.warn('Error updating chart:', e);
-                // Try to reinitialize the chart
+                console.error('Error updating chart:', e);
                 this.destroyChart();
                 this.$nextTick(() => this.initChart());
             }
@@ -746,20 +754,36 @@ function app() {
                 return;
             }
 
-            // 从聚合数据构建图表数据
-            const labels = this.chartAggregatedData.map(p => p.time);
-            const data = this.chartAggregatedData.map(p => p.duration);
 
-            // 根据状态设置点的颜色（可选：用于显示异常点）
-            const pointColors = this.chartAggregatedData.map(p => {
+            // ✅ 修复：使用 JSON 深度克隆彻底解除 Proxy，避免 toString() 循环
+            const plainData = JSON.parse(JSON.stringify(this.chartAggregatedData.map(p => ({
+                time: p.time,
+                duration: p.duration || 0,
+                status: p.status,
+                isLive: p.isLive,
+                uptime: p.uptime
+            }))));
+
+            const labels = plainData.map(p => p.time);
+            const data = plainData.map(p => p.duration);
+
+            // ✅ 使用纯数据计算颜色
+            const pointColors = plainData.map(p => {
                 if (p.status === 0) return '#e74c3c'; // 异常：红色
                 if (p.status === -1) return '#bdc3c7'; // 无数据：灰色
                 if (p.isLive) return '#3498db'; // 实时数据：蓝色
                 return '#2ecc71'; // 正常：绿色
             });
 
+            // ✅ 使用纯数据用于 tooltip
+            const tooltipData = plainData.map(p => ({
+                uptime: p.uptime || 0,
+                isLive: p.isLive || false
+            }));
+
             try {
-                this.chart = new Chart(canvas, {
+                // ✅ 将 Chart 实例存储在 canvas DOM 元素上
+                canvas._chartInstance = new Chart(canvas, {
                     type: 'line',
                     data: {
                         labels: labels,
@@ -784,9 +808,9 @@ function app() {
                             legend: { display: false },
                             tooltip: {
                                 callbacks: {
-                                    // 自定义tooltip显示更多信息
+                                    // ✅ 使用纯数据副本，避免访问 Alpine.js Proxy
                                     afterLabel: (context) => {
-                                        const point = this.chartAggregatedData[context.dataIndex];
+                                        const point = tooltipData[context.dataIndex];
                                         if (point) {
                                             let lines = [];
                                             if (point.uptime !== undefined) {
@@ -826,8 +850,8 @@ function app() {
                     }
                 });
             } catch (e) {
-                console.warn('Error creating aggregated chart:', e);
-                this.chart = null;
+                console.error('Error creating aggregated chart:', e);
+                canvas._chartInstance = null;
             }
         },
 

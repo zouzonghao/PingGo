@@ -988,6 +988,11 @@ func (s *Server) registerRoutes() {
 		s.serveStaticFile(c, "admin.html")
 	})
 
+	// Serve favicon.ico by redirecting or serving the avif
+	s.router.GET("/favicon.ico", func(c *gin.Context) {
+		s.serveStaticFile(c, "assets/favicon.avif")
+	})
+
 	// Socket.IO Handler
 	handler := s.socketServer.ServeHandler(nil)
 	s.router.GET("/socket.io/*any", gin.WrapH(handler))
@@ -1009,10 +1014,18 @@ func (s *Server) serveStaticFile(c *gin.Context, filename string) {
 		}
 
 		contentType := "text/html; charset=utf-8"
-		if len(filename) > 3 && filename[len(filename)-3:] == ".js" {
+		if strings.HasSuffix(filename, ".js") {
 			contentType = "application/javascript"
-		} else if len(filename) > 4 && filename[len(filename)-4:] == ".css" {
+		} else if strings.HasSuffix(filename, ".css") {
 			contentType = "text/css"
+		} else if strings.HasSuffix(filename, ".avif") {
+			contentType = "image/avif"
+		} else if strings.HasSuffix(filename, ".ico") {
+			contentType = "image/x-icon"
+		} else if strings.HasSuffix(filename, ".png") {
+			contentType = "image/png"
+		} else if strings.HasSuffix(filename, ".svg") {
+			contentType = "image/svg+xml"
 		}
 
 		c.Data(http.StatusOK, contentType, content)
