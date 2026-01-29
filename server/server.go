@@ -11,6 +11,7 @@ import (
 	"ping-go/model"
 	"ping-go/monitor"
 	"ping-go/notification"
+	"ping-go/pkg/logger"
 	"strings"
 	"sync"
 	"time"
@@ -18,30 +19,20 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/zishang520/socket.io/socket"
+	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 )
 
-type Session struct {
-	UserID    uint
-	ExpiresAt time.Time
-}
-
-var sessions = struct {
-	sync.RWMutex
-	data map[string]Session
-}{data: make(map[string]Session)}
+// Session struct is now in model package
+// sessions map removed in favor of DB persistence
 
 func startSessionCleanup() {
 	ticker := time.NewTicker(1 * time.Hour)
 	for range ticker.C {
-		sessions.Lock()
-		now := time.Now()
-		for token, sess := range sessions.data {
-			if now.After(sess.ExpiresAt) {
-				delete(sessions.data, token)
-			}
+		// Clean up expired sessions from DB
+		if err := db.DB.Where("expires_at < ?", time.Now()).Delete(&model.Session{}).Error; err != nil {
+			logger.Error("Failed to clean up sessions", zap.Error(err))
 		}
-		sessions.Unlock()
 	}
 }
 
@@ -68,12 +59,32 @@ func NewServer(monitorService *monitor.Service, staticFS http.FileSystem) *Serve
 		staticFS:       staticFS,
 	}
 
+	// Add Health Check Endpoint
+	s.router.GET("/health", func(c *gin.Context) {
+		health := s.monitorService.HealthCheck()
+		// Check DB
+		sqlDB, err := db.DB.DB()
+		if err != nil {
+			health["database"] = "error"
+		} else if err := sqlDB.Ping(); err != nil {
+			health["database"] = "down"
+		} else {
+			health["database"] = "up"
+		}
+		c.JSON(http.StatusOK, health)
+	})
+
+	// Add metrics endpoint placeholder (if needed later)
+	s.router.GET("/metrics", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "enabled"})
+	})
+
 	// Start session cleanup job
 	go startSessionCleanup()
 
 	s.socketServer.On("connection", func(clients ...any) {
 		client := clients[0].(*socket.Socket)
-		fmt.Println("connected:", client.Id())
+		logger.Debug("Client connected", zap.String("id", string(client.Id())))
 		client.Join("public")
 
 		// Handle disconnection to clean up socketAuth
@@ -88,7 +99,7 @@ func NewServer(monitorService *monitor.Service, staticFS http.FileSystem) *Serve
 
 		// Handle "checkSetup"
 		client.On("checkSetup", func(args ...any) {
-			fmt.Println("checkSetup called from", client.Id())
+			logger.Debug("checkSetup called", zap.String("client", string(client.Id())))
 			var count int64
 			db.DB.Model(&model.User{}).Count(&count)
 			if len(args) > 0 {
@@ -102,12 +113,12 @@ func NewServer(monitorService *monitor.Service, staticFS http.FileSystem) *Serve
 		// Handle "setup"
 		client.On("setup", func(args ...any) {
 			if len(args) < 1 {
-				fmt.Printf("setup: missing arguments from %s\n", client.Id())
+				logger.Warn("setup: missing arguments", zap.String("client", string(client.Id())))
 				return
 			}
 			data, ok := args[0].(map[string]any)
 			if !ok {
-				fmt.Printf("setup: invalid data format from %s\n", client.Id())
+				logger.Warn("setup: invalid data format", zap.String("client", string(client.Id())))
 				return
 			}
 
@@ -199,19 +210,23 @@ func NewServer(monitorService *monitor.Service, staticFS http.FileSystem) *Serve
 			if err == nil {
 				// Compare password
 				if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password)); err == nil {
-					// Create session
+					// Create persistent session
 					token := generateToken()
-					sessions.Lock()
-					sessions.data[token] = Session{
+					sess := model.Session{
+						Token:     token,
 						UserID:    user.ID,
-						ExpiresAt: time.Now().Add(24 * time.Hour),
+						ExpiresAt: time.Now().Add(24 * time.Hour), // 24h expiration
 					}
-					sessions.Unlock()
+					if err := db.DB.Create(&sess).Error; err != nil {
+						client.Emit("error", map[string]any{"msg": "Failed to create session"})
+						return
+					}
 
 					// Mark as authenticated in socket data
 					socketAuth.Store(client.Id(), map[string]any{
 						"authenticated": true,
 						"userID":        user.ID,
+						"token":         token,
 					})
 					client.Join("admin")
 
@@ -250,14 +265,15 @@ func NewServer(monitorService *monitor.Service, staticFS http.FileSystem) *Serve
 				return
 			}
 
-			sessions.RLock()
-			sess, exists := sessions.data[token]
-			sessions.RUnlock()
+			var sess model.Session
+			err := db.DB.First(&sess, "token = ?", token).Error
+			exists := err == nil
 
 			if exists && time.Now().Before(sess.ExpiresAt) {
 				socketAuth.Store(client.Id(), map[string]any{
 					"authenticated": true,
 					"userID":        sess.UserID,
+					"token":         token,
 				})
 				client.Join("admin")
 				if len(args) > 1 {
@@ -294,17 +310,18 @@ func NewServer(monitorService *monitor.Service, staticFS http.FileSystem) *Serve
 					if len(args) > 0 {
 						if data, ok := args[0].(map[string]any); ok {
 							if token, ok := data["token"].(string); ok {
-								sessions.RLock()
-								sess, exists := sessions.data[token]
-								sessions.RUnlock()
-								if exists && time.Now().Before(sess.ExpiresAt) {
-									socketAuth.Store(client.Id(), map[string]any{
-										"authenticated": true,
-										"userID":        sess.UserID,
-									})
-									client.Join("admin")
-									handler(args...)
-									return
+								var sess model.Session
+								if err := db.DB.First(&sess, "token = ?", token).Error; err == nil {
+									if time.Now().Before(sess.ExpiresAt) {
+										socketAuth.Store(client.Id(), map[string]any{
+											"authenticated": true,
+											"userID":        sess.UserID,
+											"token":         token,
+										})
+										client.Join("admin")
+										handler(args...)
+										return
+									}
 								}
 							}
 						}
@@ -322,6 +339,14 @@ func NewServer(monitorService *monitor.Service, staticFS http.FileSystem) *Serve
 
 		// Handle "logout"
 		client.On("logout", func(args ...any) {
+			if val, ok := socketAuth.Load(client.Id()); ok {
+				if data, ok := val.(map[string]any); ok {
+					if token, ok := data["token"].(string); ok {
+						// Delete session from DB
+						db.DB.Delete(&model.Session{}, "token = ?", token)
+					}
+				}
+			}
 			socketAuth.Delete(client.Id())
 			if len(args) > 0 {
 				ack := args[0].(func([]any, error))
@@ -392,7 +417,11 @@ func NewServer(monitorService *monitor.Service, staticFS http.FileSystem) *Serve
 			if !ok {
 				return
 			}
-			id := uint(idVal.(float64))
+			idFloat, err := getFloat64(idVal)
+			if err != nil {
+				return
+			}
+			id := uint(idFloat)
 
 			var n model.Notification
 			if err := db.DB.First(&n, id).Error; err != nil {
@@ -437,7 +466,10 @@ func NewServer(monitorService *monitor.Service, staticFS http.FileSystem) *Serve
 			if len(args) < 1 {
 				return
 			}
-			id := uint(args[0].(float64))
+			id, err := getArgAsUint(args, 0)
+			if err != nil {
+				return
+			}
 			db.DB.Delete(&model.Notification{}, id)
 
 			if len(args) > 1 {
@@ -459,7 +491,10 @@ func NewServer(monitorService *monitor.Service, staticFS http.FileSystem) *Serve
 			if len(args) < 1 {
 				return
 			}
-			id := uint(args[0].(float64))
+			id, err := getArgAsUint(args, 0)
+			if err != nil {
+				return
+			}
 
 			var n model.Notification
 			if err := db.DB.First(&n, id).Error; err != nil {
@@ -571,7 +606,10 @@ func NewServer(monitorService *monitor.Service, staticFS http.FileSystem) *Serve
 			if len(args) < 1 {
 				return
 			}
-			id := uint(args[0].(float64))
+			id, err := getArgAsUint(args, 0)
+			if err != nil {
+				return
+			}
 			var m model.Monitor
 			if err := db.DB.First(&m, id).Error; err == nil {
 				data := make(map[string]any)
@@ -586,6 +624,15 @@ func NewServer(monitorService *monitor.Service, staticFS http.FileSystem) *Serve
 				data["last_check"] = m.LastCheck
 				data["recentResults"] = s.getRecentResults(m.ID)
 
+				// Advanced fields
+				data["method"] = m.Method
+				data["body"] = m.Body
+				data["headers"] = m.Headers
+				data["timeout"] = m.Timeout
+				data["expected_status"] = m.ExpectedStatus
+				data["response_regex"] = m.ResponseRegex
+				data["follow_redirects"] = m.FollowRedirects
+
 				// Return to the authenticated socket
 				client.Emit("monitor", data)
 			}
@@ -595,7 +642,10 @@ func NewServer(monitorService *monitor.Service, staticFS http.FileSystem) *Serve
 			if len(args) < 1 {
 				return
 			}
-			monitorID := uint(args[0].(float64))
+			monitorID, err := getArgAsUint(args, 0)
+			if err != nil {
+				return
+			}
 
 			var heartbeats []model.Heartbeat
 			db.DB.Where("monitor_id = ?", monitorID).Order("time desc").Limit(30).Find(&heartbeats)
@@ -620,8 +670,15 @@ func NewServer(monitorService *monitor.Service, staticFS http.FileSystem) *Serve
 			if len(args) < 2 {
 				return
 			}
-			monitorID := uint(args[0].(float64))
-			hours := int(args[1].(float64)) // 查询时间范围（小时）
+			monitorID, err := getArgAsUint(args, 0)
+			if err != nil {
+				return
+			}
+			hoursFloat, err := getArgAsFloat64(args, 1)
+			if err != nil {
+				return
+			}
+			hours := int(hoursFloat)
 
 			// 使用智能查询层
 			results, dataType := db.GetHeartbeatsWithTimeRange(monitorID, hours)
@@ -639,7 +696,10 @@ func NewServer(monitorService *monitor.Service, staticFS http.FileSystem) *Serve
 			if len(args) < 1 {
 				return
 			}
-			monitorID := uint(args[0].(float64))
+			monitorID, err := getArgAsUint(args, 0)
+			if err != nil {
+				return
+			}
 			stats := s.getMonitorStats(monitorID)
 			client.Emit("monitorStats", monitorID, stats)
 		})
@@ -651,7 +711,10 @@ func NewServer(monitorService *monitor.Service, staticFS http.FileSystem) *Serve
 			if len(args) < 2 {
 				return
 			}
-			monitorID := uint(args[0].(float64))
+			monitorID, err := getArgAsUint(args, 0)
+			if err != nil {
+				return
+			}
 			view, _ := args[1].(string) // "24h" 或 "7d"
 
 			// 获取图表数据
@@ -669,7 +732,10 @@ func NewServer(monitorService *monitor.Service, staticFS http.FileSystem) *Serve
 			if len(args) < 1 {
 				return
 			}
-			monitorID := uint(args[0].(float64))
+			monitorID, err := getArgAsUint(args, 0)
+			if err != nil {
+				return
+			}
 
 			// 清理原始数据
 			db.DB.Where("monitor_id = ?", monitorID).Delete(&model.Heartbeat{})
@@ -723,11 +789,24 @@ func NewServer(monitorService *monitor.Service, staticFS http.FileSystem) *Serve
 				followRedirects = fr
 			}
 
+			name := safeMapGetString(data, "name")
+			if name == "" {
+				client.Emit("notification", map[string]any{
+					"message": "Name is required",
+					"type":    "error",
+				})
+				return
+			}
+			url := safeMapGetString(data, "url")
+			mType := safeMapGetString(data, "type")
+			intervalFloat, _ := safeMapGetFloat64(data, "interval")
+			interval := int(intervalFloat)
+
 			m := model.Monitor{
-				Name:            data["name"].(string),
-				URL:             data["url"].(string),
-				Type:            model.MonitorType(data["type"].(string)),
-				Interval:        int(data["interval"].(float64)),
+				Name:            name,
+				URL:             url,
+				Type:            model.MonitorType(mType),
+				Interval:        interval,
 				Method:          method,
 				Body:            body,
 				Headers:         headers,
@@ -745,7 +824,7 @@ func NewServer(monitorService *monitor.Service, staticFS http.FileSystem) *Serve
 
 			// Check for duplicate name
 			var count int64
-			db.DB.Model(&model.Monitor{}).Where("name = ?", data["name"].(string)).Count(&count)
+			db.DB.Model(&model.Monitor{}).Where("name = ?", name).Count(&count)
 			if count > 0 {
 				client.Emit("notification", map[string]any{
 					"message": "监控项名称已存在，请使用唯一名称",
@@ -791,7 +870,11 @@ func NewServer(monitorService *monitor.Service, staticFS http.FileSystem) *Serve
 				return
 			}
 
-			id := uint(data["id"].(float64))
+			idFloat, ok := safeMapGetFloat64(data, "id")
+			if !ok {
+				return
+			}
+			id := uint(idFloat)
 			var m model.Monitor
 			if err := db.DB.First(&m, id).Error; err != nil {
 				return
@@ -800,37 +883,64 @@ func NewServer(monitorService *monitor.Service, staticFS http.FileSystem) *Serve
 			// Store old active state to detect change
 			oldActive := m.Active
 
-			m.Name = data["name"].(string)
-			m.URL = data["url"].(string)
-			m.Type = model.MonitorType(data["type"].(string))
-			m.Interval = int(data["interval"].(float64))
+			newName := safeMapGetString(data, "name")
+			if newName == "" {
+				client.Emit("notification", map[string]any{
+					"message": "Name is required",
+					"type":    "error",
+				})
+				return
+			}
+
+			// Check for duplicate name (excluding self)
+			if m.Name != newName {
+				var count int64
+				db.DB.Model(&model.Monitor{}).Where("name = ? AND id != ?", newName, id).Count(&count)
+				if count > 0 {
+					client.Emit("notification", map[string]any{
+						"message": "监控项名称已存在，请使用唯一名称",
+						"type":    "error",
+					})
+					return
+				}
+			}
+
+			m.Name = newName
+			m.URL = safeMapGetString(data, "url")
+			m.Type = model.MonitorType(safeMapGetString(data, "type"))
+
+			if intervalFloat, ok := safeMapGetFloat64(data, "interval"); ok {
+				m.Interval = int(intervalFloat)
+			} else {
+				m.Interval = 60 // Default if missing
+			}
 
 			// Handle active field for pause/resume functionality
-			if active, ok := data["active"].(float64); ok {
+			if active, ok := safeMapGetFloat64(data, "active"); ok {
 				m.Active = int(active)
 			}
 
-			if method, ok := data["method"].(string); ok && method != "" {
+			if method := safeMapGetString(data, "method"); method != "" {
 				m.Method = method
 			} else {
 				m.Method = "GET"
 			}
-			m.Body, _ = data["body"].(string)
-			m.Headers, _ = data["headers"].(string)
+			m.Body = safeMapGetString(data, "body")
+			m.Headers = safeMapGetString(data, "headers")
 
-			if t, ok := data["timeout"].(float64); ok {
+			if t, ok := safeMapGetFloat64(data, "timeout"); ok {
 				m.Timeout = int(t)
 			} else {
 				m.Timeout = 10
 			}
 
-			if s, ok := data["expected_status"].(float64); ok {
+			if s, ok := safeMapGetFloat64(data, "expected_status"); ok {
 				m.ExpectedStatus = int(s)
 			} else {
 				m.ExpectedStatus = 0
 			}
 
-			m.ResponseRegex, _ = data["response_regex"].(string)
+			m.ResponseRegex = safeMapGetString(data, "response_regex")
 
 			if fr, ok := data["follow_redirects"].(bool); ok {
 				m.FollowRedirects = fr
@@ -840,19 +950,6 @@ func NewServer(monitorService *monitor.Service, staticFS http.FileSystem) *Serve
 
 			if m.Interval < 20 {
 				m.Interval = 20
-			}
-
-			// Check for duplicate name (excluding self)
-			if m.Name != data["name"].(string) {
-				var count int64
-				db.DB.Model(&model.Monitor{}).Where("name = ? AND id != ?", data["name"].(string), id).Count(&count)
-				if count > 0 {
-					client.Emit("notification", map[string]any{
-						"message": "监控项名称已存在，请使用唯一名称",
-						"type":    "error",
-					})
-					return
-				}
 			}
 
 			if err := db.DB.Save(&m).Error; err != nil {

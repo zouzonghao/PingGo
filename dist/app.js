@@ -81,6 +81,17 @@ function app() {
             onConfirm: null
         },
 
+        // Message Detail Modal
+        msgDetail: {
+            show: false,
+            content: ''
+        },
+
+        openMsgDetail(msg) {
+            this.msgDetail.content = msg;
+            this.msgDetail.show = true;
+        },
+
         get parsedNotifications() {
             return this.notifications.map(n => {
                 let cfg = {};
@@ -105,24 +116,81 @@ function app() {
             return Math.round(sum / validHeartbeats.length);
         },
 
+        connectionStatus: 'connected', // connected, disconnected, reconnecting
+
+        // 3.4 错误处理优化: 统一错误处理
+        handleError(error) {
+            console.error('App Error:', error);
+
+            // Check for known error formats
+            let msg = '未知错误';
+            let type = 'error';
+
+            if (typeof error === 'string') {
+                msg = error;
+            } else if (error && error.msg) {
+                msg = error.msg;
+            } else if (error && error.message) {
+                msg = error.message;
+            } else if (error && error.code) {
+                // Determine message based on code
+                switch (error.code) {
+                    case 401:
+                        msg = '认证失败，请重新登录';
+                        this.page = 'login';
+                        break;
+                    case 403:
+                        msg = '无权执行此操作';
+                        break;
+                    case 404:
+                        msg = '资源未找到';
+                        break;
+                    case 500:
+                        msg = '服务器内部错误';
+                        break;
+                    default:
+                        msg = `错误 (${error.code})`;
+                }
+            }
+
+            this.showAlert('错误', msg, type);
+        },
+
         init() {
             this.socket = io({
-                transports: ['websocket', 'polling']
+                transports: ['websocket', 'polling'],
+                reconnection: true,
+                reconnectionAttempts: Infinity,
+                reconnectionDelay: 1000,
+                reconnectionDelayMax: 5000,
             });
 
             this.socket.on('connect', () => {
                 console.log('已连接到服务器');
+                this.connectionStatus = 'connected';
+
+                // 尝试恢复会话
+                const token = localStorage.getItem('pinggo_token');
+
+                // 必须先检查是否需要 Setup
                 this.socket.emit('checkSetup', (res) => {
                     if (res.needSetup) {
                         this.page = 'setup';
                     } else {
-                        const token = localStorage.getItem('pinggo_token');
                         if (token) {
+                            // 尝试自动登录
                             this.socket.emit('auth', { token }, (authRes) => {
                                 if (authRes && authRes.ok) {
-                                    this.page = 'dashboard';
+                                    if (this.page === 'loading' || this.page === 'login') {
+                                        this.page = 'dashboard';
+                                    }
+                                    // 刷新数据
                                     this.socket.emit('getMonitorList');
+                                    if (this.dashboardView === 'details' && this.currentMonitor) {
+                                        this.selectMonitor(this.currentMonitor);
+                                    }
                                 } else {
+                                    // Token 无效
                                     localStorage.removeItem('pinggo_token');
                                     this.page = 'login';
                                 }
@@ -132,6 +200,15 @@ function app() {
                         }
                     }
                 });
+            });
+
+            this.socket.on('disconnect', (reason) => {
+                console.warn('连接断开:', reason);
+                this.connectionStatus = 'disconnected';
+            });
+
+            this.socket.on('reconnect_attempt', () => {
+                this.connectionStatus = 'reconnecting';
             });
 
             this.socket.on('adminMonitorList', (list) => {

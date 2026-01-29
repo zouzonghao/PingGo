@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"os"
@@ -13,12 +12,14 @@ import (
 	"ping-go/db"
 	"ping-go/model"
 	"ping-go/notification"
+	"ping-go/pkg/logger"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	probing "github.com/prometheus-community/pro-bing"
+	"go.uber.org/zap"
 )
 
 const (
@@ -46,9 +47,12 @@ type Service struct {
 }
 
 func NewService() *Service {
+	// Init logger if not already
+	logger.Init("info")
+
 	// Reset all notifications to inactive on startup
 	if err := db.DB.Model(&model.Notification{}).Where("1=1").Update("active", false).Error; err != nil {
-		log.Printf("Failed to reset notification active status: %v", err)
+		logger.Error("Failed to reset notification active status", zap.Error(err))
 	}
 
 	s := &Service{
@@ -59,9 +63,45 @@ func NewService() *Service {
 		stopWorker:          make(chan struct{}),
 		stoppedMonitors:     make(map[uint]bool),
 	}
+
 	go s.runNotificationWorker()
 	go s.runScheduledWorker()
 	return s
+}
+
+func (s *Service) Shutdown(ctx context.Context) error {
+	logger.Info("Shutting down monitor service...")
+
+	// Stop notification worker
+	if !s.workerStopped {
+		close(s.stopWorker)
+		s.workerStopped = true
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for id := range s.monitors {
+		if stopChan, ok := s.stopChans[id]; ok {
+			close(stopChan)
+		}
+		if ticker, ok := s.tickers[id]; ok {
+			ticker.Stop()
+		}
+	}
+
+	return nil
+}
+
+func (s *Service) HealthCheck() map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return map[string]any{
+		"total_monitors":  len(s.monitors),
+		"active_monitors": len(s.tickers),
+		"status":          "healthy",
+	}
 }
 
 func (s *Service) runNotificationWorker() {
@@ -104,7 +144,7 @@ func (s *Service) runNotificationWorker() {
 
 						go func(recipients []string, subj, body string) {
 							if err := notification.SendEmail(recipients, subj, body); err != nil {
-								log.Printf("Failed to send trigger email to %v: %v", recipients, err)
+								logger.Error("Failed to send trigger email", zap.Strings("recipients", recipients), zap.Error(err))
 							}
 						}(to, subject, content)
 					}
@@ -339,7 +379,7 @@ func (s *Service) sendReport(email string) {
 	`
 
 	if err := notification.SendEmail([]string{email}, subject, html); err != nil {
-		log.Printf("Failed to send report to %s: %v", email, err)
+		logger.Error("Failed to send report", zap.String("email", email), zap.Error(err))
 	}
 }
 
@@ -347,7 +387,7 @@ func (s *Service) Start() {
 	var monitors []model.Monitor
 	result := db.DB.Find(&monitors)
 	if result.Error != nil {
-		log.Printf("Failed to load monitors: %v", result.Error)
+		logger.Error("Failed to load monitors", zap.Error(result.Error))
 		return
 	}
 
@@ -380,7 +420,7 @@ func (s *Service) StartMonitor(m *model.Monitor) {
 	s.monitors[m.ID] = m
 
 	if m.Active != 1 {
-		log.Printf("Monitor %s is inactive, skipping", m.Name)
+		logger.Info("Monitor is inactive, skipping", zap.String("name", m.Name))
 		return
 	}
 
@@ -405,7 +445,7 @@ func (s *Service) StartMonitor(m *model.Monitor) {
 			}
 		}
 	}()
-	log.Printf("Started monitoring for %s (%s)", m.Name, m.URL)
+	logger.Info("Started monitoring", zap.String("name", m.Name), zap.String("url", m.URL))
 }
 
 func (s *Service) StopMonitor(id uint) {
@@ -417,7 +457,7 @@ func (s *Service) StopMonitor(id uint) {
 	}
 
 	if m, ok := s.monitors[id]; ok {
-		log.Printf("Stopped monitoring for %s (%s)", m.Name, m.URL)
+		logger.Info("Stopped monitoring", zap.String("name", m.Name), zap.String("url", m.URL))
 	}
 
 	if stopChan, ok := s.stopChans[id]; ok {
@@ -495,9 +535,12 @@ func (s *Service) Check(id uint) {
 		}
 	}
 
-	// Status Change Detection
 	if m.Status != model.StatusPending && m.Status != status {
-		log.Printf("Monitor %s status changed: %d -> %d", m.Name, m.Status, status)
+		logger.Info("Monitor status changed",
+			zap.String("name", m.Name),
+			zap.Int("old_status", m.Status),
+			zap.Int("new_status", status),
+		)
 
 		// Copy for callback
 		mCopy := m
@@ -514,7 +557,7 @@ func (s *Service) Check(id uint) {
 			Message:   msg,
 		}:
 		default:
-			log.Println("Notification channel full, dropping alert")
+			logger.Warn("Notification channel full, dropping alert")
 		}
 	}
 
@@ -540,7 +583,12 @@ func (s *Service) Check(id uint) {
 		s.OnHeartbeat(&heartbeat)
 	}
 
-	log.Printf("Check %s (%s): %d (%s)", m.Name, m.Type, status, msg)
+	logger.Info("Check finished",
+		zap.String("name", m.Name),
+		zap.String("type", string(m.Type)),
+		zap.Int("status", status),
+		zap.String("msg", msg),
+	)
 }
 
 func statusToString(status int) string {
@@ -593,7 +641,7 @@ func getCustomResolver() *net.Resolver {
 			}
 
 			// Default logic: Try Google DNS first, then Alidns
-			conn, err := d.DialContext(ctx, "udp", "8.8.8.8:53")
+			conn, err := d.DialContext(ctx, "udp", "1.1.1.1:53")
 			if err == nil {
 				return conn, nil
 			}
@@ -602,6 +650,36 @@ func getCustomResolver() *net.Resolver {
 			return d.DialContext(ctx, "udp", "223.5.5.5:53")
 		},
 	}
+}
+
+var (
+	httpClient           *http.Client
+	httpClientNoRedirect *http.Client
+	httpClientOnce       sync.Once
+)
+
+func initHTTPClients() {
+	httpClientOnce.Do(func() {
+		httpClient = &http.Client{
+			Transport: defaultTransport,
+			Timeout:   30 * time.Second, // Default timeout, check level overrides context
+		}
+		httpClientNoRedirect = &http.Client{
+			Transport: defaultTransport,
+			Timeout:   30 * time.Second,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		}
+	})
+}
+
+func getHTTPClient(followRedirects bool) *http.Client {
+	initHTTPClients()
+	if followRedirects {
+		return httpClient
+	}
+	return httpClientNoRedirect
 }
 
 func CheckHTTP(m model.Monitor) (int, string) {
@@ -628,15 +706,7 @@ func CheckHTTP(m model.Monitor) (int, string) {
 		return model.StatusDown, fmt.Sprintf("Create request failed: %v", err)
 	}
 
-	client := &http.Client{
-		Transport: defaultTransport,
-	}
-
-	if !m.FollowRedirects {
-		client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		}
-	}
+	client := getHTTPClient(m.FollowRedirects)
 
 	// Add Headers
 	if m.Headers != "" {
@@ -693,29 +763,66 @@ func CheckHTTP(m model.Monitor) (int, string) {
 	defer resp.Body.Close()
 
 	// Check Status
+	// Check Status
+	statusOk := true
+	var errorMsg string
+
 	if m.ExpectedStatus > 0 {
 		if resp.StatusCode != m.ExpectedStatus {
-			return model.StatusDown, fmt.Sprintf("Status %d (Expected %d)", resp.StatusCode, m.ExpectedStatus)
+			statusOk = false
+			errorMsg = fmt.Sprintf("Status %d (Expected %d)", resp.StatusCode, m.ExpectedStatus)
 		}
 	} else {
 		// Default 2xx check
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return model.StatusDown, fmt.Sprintf("HTTP %d %s", resp.StatusCode, http.StatusText(resp.StatusCode))
+			statusOk = false
+			errorMsg = fmt.Sprintf("HTTP %d %s", resp.StatusCode, http.StatusText(resp.StatusCode))
 		}
+	}
+
+	// Helper function for body truncation
+	truncateBody := func(b string) string {
+		maxLen := 300
+		if len(b) > maxLen {
+			return b[:maxLen] + "...(truncated)"
+		}
+		return b
+	}
+
+	if !statusOk {
+		// Helper: If POST request fails, append body for debugging
+		if m.Method == "POST" {
+			// Read up to 10KB (enough for most error JSONs)
+			bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 10240))
+			if len(bodyBytes) > 0 {
+				bodyStr := strings.TrimSpace(string(bodyBytes))
+				if bodyStr != "" {
+					errorMsg += fmt.Sprintf(" Body: %s", truncateBody(bodyStr))
+				}
+			}
+		}
+		return model.StatusDown, errorMsg
 	}
 
 	// Check Regex
 	if m.ResponseRegex != "" {
-		bodyBytes, err := io.ReadAll(resp.Body)
+		// Read body (limit to 1MB for regex matching correctness)
+		bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
 		if err != nil {
 			return model.StatusDown, fmt.Sprintf("Read body failed: %v", err)
 		}
-		matched, err := regexp.MatchString(m.ResponseRegex, string(bodyBytes))
+		bodyStr := string(bodyBytes)
+		matched, err := regexp.MatchString(m.ResponseRegex, bodyStr)
 		if err != nil {
 			return model.StatusDown, fmt.Sprintf("Regex error: %v", err)
 		}
 		if !matched {
-			return model.StatusDown, "Regex mismatch"
+			msg := "响应不匹配！"
+			if len(bodyStr) > 0 {
+				// Truncate to 300 chars for message
+				msg += fmt.Sprintf(". Body: %s", truncateBody(strings.TrimSpace(bodyStr)))
+			}
+			return model.StatusDown, msg
 		}
 	}
 

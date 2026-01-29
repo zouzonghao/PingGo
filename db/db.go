@@ -32,15 +32,32 @@ var (
 
 func Init(dbPath string) error {
 	var err error
-	DB, err = gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
+	// Enable WAL mode
+	dsn := fmt.Sprintf("%s?_journal_mode=WAL&_busy_timeout=5000", dbPath)
+	DB, err = gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	if err != nil {
 		return fmt.Errorf("failed to connect database: %w", err)
 	}
+
+	// Optimize connection pool for SQLite
+	sqlDB, err := DB.DB()
+	if err != nil {
+		return fmt.Errorf("failed to get sqlDB: %w", err)
+	}
+	// SQLite supports one writer at a time, but WAL allows concurrent readers.
+	// However, GORM/database/sql manages connection pooling.
+	// MaxOpenConns(1) is safest for simple SQLite usage to avoid "database is locked"
+	// if we strictly want serialization, but with WAL we can increase it slightly.
+	// Since we use a single writer routine (heartbeat buffer), we can set this higher for reads.
+	sqlDB.SetMaxOpenConns(25) // Allow more for concurrent reads
+	sqlDB.SetMaxIdleConns(5)
+	sqlDB.SetConnMaxLifetime(1 * time.Hour)
 
 	// Auto Migrate - 包含聚合表
 	err = DB.AutoMigrate(
 		&model.Monitor{},
 		&model.User{},
+		&model.Session{},
 		&model.Setting{},
 		&model.Notification{},
 		&model.Heartbeat{},
