@@ -1,0 +1,51 @@
+# 工作流名称
+name: Release - Build and Publish
+
+# 触发条件
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'  # 版本标签，如 v1.0.0
+  workflow_dispatch: # 允许手动触发
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      # 检出代码
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 设置 Go 环境
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      # 下载依赖
+      - name: Download Go modules
+        run: go mod download
+
+      # 构建所有平台
+      - name: Build for all platforms
+        run: make release-all
+
+      # 压缩构建产物
+      - name: Compress artifacts
+        run: |
+          tar --owner=0 --group=0 -czf pinggo-linux-amd64.tar.gz pinggo-linux-amd64
+          zip -j pinggo-windows-amd64.zip pinggo-windows-amd64.exe
+          tar -czf pinggo-darwin-arm64.tar.gz pinggo-darwin-arm64
+
+      # 创建 Release 并上传
+      - name: Create Release and Upload Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            pinggo-linux-amd64.tar.gz
+            pinggo-windows-amd64.zip
+            pinggo-darwin-arm64.tar.gz
