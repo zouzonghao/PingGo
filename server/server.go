@@ -12,6 +12,7 @@ import (
 	"ping-go/monitor"
 	"ping-go/notification"
 	"ping-go/pkg/logger"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -631,6 +632,7 @@ func NewServer(monitorService *monitor.Service, staticFS http.FileSystem) *Serve
 				data["timeout"] = m.Timeout
 				data["expected_status"] = m.ExpectedStatus
 				data["response_regex"] = m.ResponseRegex
+				data["form_data"] = m.FormData
 				data["follow_redirects"] = m.FollowRedirects
 
 				// Return to the authenticated socket
@@ -753,6 +755,230 @@ func NewServer(monitorService *monitor.Service, staticFS http.FileSystem) *Serve
 			}
 		})
 
+		// Handle "exportMonitorConfig"
+		requireAuth("exportMonitorConfig", func(args ...any) {
+			var monitors []model.Monitor
+			// Fetch all monitors
+			if err := db.DB.Find(&monitors).Error; err != nil {
+				client.Emit("error", map[string]any{"msg": "Failed to fetch monitors"})
+				return
+			}
+			client.Emit("monitorConfigExport", monitors)
+		})
+
+		// Handle "importMonitorConfig"
+		requireAuth("importMonitorConfig", func(args ...any) {
+			if len(args) < 1 {
+				return
+			}
+
+			// Flexible input handling: try to handle it as raw object (preferred) or string
+			var monitorsInput []model.Monitor
+
+			// Use JSON round-trip to map map[string]interface{} to struct
+			jsonData, err := json.Marshal(args[0])
+			if err != nil {
+				client.Emit("error", map[string]any{"msg": "Invalid data format"})
+				return
+			}
+			if err := json.Unmarshal(jsonData, &monitorsInput); err != nil {
+				client.Emit("error", map[string]any{"msg": "Invalid JSON format"})
+				return
+			}
+
+			importedCount := 0
+			skippedCount := 0
+			var skippedNames []string
+
+			for _, m := range monitorsInput {
+				if m.Name == "" || m.URL == "" {
+					continue
+				}
+
+				// Check for duplicates by Name
+				var count int64
+				db.DB.Model(&model.Monitor{}).Where("name = ?", m.Name).Count(&count)
+				if count > 0 {
+					skippedCount++
+					skippedNames = append(skippedNames, m.Name)
+					continue
+				}
+
+				newMonitor := model.Monitor{
+					Name: m.Name,
+					URL:  m.URL,
+					Type: func() model.MonitorType {
+						switch m.Type {
+						case model.MonitorTypeHTTP, model.MonitorTypePing, model.MonitorTypeTCP, model.MonitorTypeDNS:
+							return m.Type
+						default:
+							return model.MonitorTypeHTTP
+						}
+					}(),
+					Method:          m.Method,
+					Body:            m.Body,
+					Headers:         m.Headers,
+					FormData:        sanitizeFormData(m.FormData),
+					Timeout:         m.Timeout,
+					ExpectedStatus:  m.ExpectedStatus,
+					ResponseRegex:   m.ResponseRegex,
+					FollowRedirects: m.FollowRedirects,
+					Interval:        m.Interval,
+					Active:          m.Active,
+					Weight:          m.Weight,
+				}
+				// Default values if missing
+				if newMonitor.Interval < 10 {
+					newMonitor.Interval = 60
+				}
+				if newMonitor.Timeout < 1 {
+					newMonitor.Timeout = 10
+				}
+				if newMonitor.Method == "" {
+					newMonitor.Method = "GET"
+				}
+
+				if err := db.DB.Create(&newMonitor).Error; err == nil {
+					importedCount++
+					if newMonitor.Active == 1 {
+						s.monitorService.StartMonitor(&newMonitor)
+					}
+				}
+			}
+
+			if len(args) > 1 {
+				ack := args[1].(func([]any, error))
+				ack([]any{map[string]any{
+					"ok":           true,
+					"imported":     importedCount,
+					"skipped":      skippedCount,
+					"skippedNames": skippedNames,
+				}}, nil)
+			}
+
+			// Broadcast update to all clients to refresh lists
+			s.socketServer.To("public").Emit("updateMonitorList")
+		})
+
+		// Handle "testMonitor"
+		requireAuth("testMonitor", func(args ...any) {
+			if len(args) < 1 {
+				return
+			}
+
+			data, ok := args[0].(map[string]any)
+			if !ok {
+				return
+			}
+
+			// Extract optional fields with defaults
+			method, _ := data["method"].(string)
+			if method == "" {
+				method = "GET"
+			}
+			body, _ := data["body"].(string)
+			headers, _ := data["headers"].(string)
+
+			timeout := 10
+			if t, ok := data["timeout"].(float64); ok {
+				timeout = int(t)
+			}
+
+			expectedStatus := 0
+			if s, ok := data["expected_status"].(float64); ok {
+				expectedStatus = int(s)
+			}
+
+			responseRegex, _ := data["response_regex"].(string)
+			if responseRegex != "" && json.Valid([]byte(responseRegex)) {
+				keyRe := regexp.MustCompile(`"([^"\\]*(?:\\.[^"\\]*)*)"\s*:`)
+				matches := keyRe.FindAllStringSubmatch(responseRegex, -1)
+				if len(matches) > 0 {
+					var builder strings.Builder
+					builder.WriteString("(?s)\\{")
+					for _, match := range matches {
+						builder.WriteString(fmt.Sprintf(".*\"%s\"", match[1]))
+					}
+					builder.WriteString(".*\\}")
+					responseRegex = builder.String()
+				}
+			}
+			formData, _ := data["form_data"].(string)
+
+			followRedirects := true
+			if fr, ok := data["follow_redirects"].(bool); ok {
+				followRedirects = fr
+			}
+
+			url := safeMapGetString(data, "url")
+			mType := safeMapGetString(data, "type")
+
+			m := model.Monitor{
+				URL:             url,
+				Type:            model.MonitorType(mType),
+				Method:          method,
+				Body:            body,
+				Headers:         headers,
+				Timeout:         timeout,
+				ExpectedStatus:  expectedStatus,
+				ResponseRegex:   responseRegex,
+				FormData:        formData,
+				FollowRedirects: followRedirects,
+			}
+
+			// Perform the check directly
+			var status int
+			var msg string
+			// var duration int
+
+			switch m.Type {
+			case model.MonitorTypeHTTP:
+				status, msg = monitor.TestHTTP(m)
+			case model.MonitorTypePing:
+				s, m2, _ := monitor.CheckPing(m.URL, m.Timeout)
+				msg = m2
+				if s == model.StatusUp {
+					status = 200
+				} else {
+					status = 0
+				}
+			case model.MonitorTypeTCP:
+				s, m2, _ := monitor.CheckTCP(m.URL, m.Timeout)
+				msg = m2
+				if s == model.StatusUp {
+					status = 200
+				} else {
+					status = 0
+				}
+			case model.MonitorTypeDNS:
+				s, m2 := monitor.CheckDNS(m.URL, m.Timeout)
+				msg = m2
+				if s == model.StatusUp {
+					status = 200
+				} else {
+					status = 0
+				}
+			default:
+				status = 0
+				msg = "Unknown monitor type"
+			}
+
+			// Limit message length
+			if len(msg) > 1000 {
+				msg = msg[:1000] + "..."
+			}
+
+			// Ack with result
+			if len(args) > 1 {
+				ack := args[1].(func([]any, error))
+				ack([]any{map[string]any{
+					"ok":     true,
+					"status": status,
+					"msg":    msg,
+				}}, nil)
+			}
+		})
+
 		// Handle "add"
 		requireAuth("add", func(args ...any) {
 			if len(args) < 1 {
@@ -783,6 +1009,29 @@ func NewServer(monitorService *monitor.Service, staticFS http.FileSystem) *Serve
 			}
 
 			responseRegex, _ := data["response_regex"].(string)
+			// 响应正则验证设计说明：
+			// 核心逻辑：用户输入的始终是正则表达式，用于匹配 HTTP 响应体。
+			// 智能转换：为方便用户使用，系统支持直接输入 JSON 格式。
+			// 如果检测到有效 JSON，会自动提取其中的键名，转换为正则表达式后存储到数据库。
+			// 例如：用户输入 {"code": 0, "data": {}} 会转换为 (?s)\{.*"code".*"data".*\}
+			// 这样数据库中存储的始终是正则表达式，运行时统一使用正则匹配逻辑。
+			// 注：Go RE2 不支持 lookahead，因此使用按键出现顺序的顺序匹配方式。
+			if responseRegex != "" && json.Valid([]byte(responseRegex)) {
+				// Extract keys in order of appearance
+				keyRe := regexp.MustCompile(`"([^"\\]*(?:\\.[^"\\]*)*)"\s*:`)
+				matches := keyRe.FindAllStringSubmatch(responseRegex, -1)
+				if len(matches) > 0 {
+					var builder strings.Builder
+					builder.WriteString("(?s)\\{")
+					for _, match := range matches {
+						// match[1] is the key name
+						builder.WriteString(fmt.Sprintf(".*\"%s\"", match[1]))
+					}
+					builder.WriteString(".*\\}")
+					responseRegex = builder.String()
+				}
+			}
+			formData, _ := data["form_data"].(string)
 
 			followRedirects := true
 			if fr, ok := data["follow_redirects"].(bool); ok {
@@ -813,6 +1062,7 @@ func NewServer(monitorService *monitor.Service, staticFS http.FileSystem) *Serve
 				Timeout:         timeout,
 				ExpectedStatus:  expectedStatus,
 				ResponseRegex:   responseRegex,
+				FormData:        formData,
 				FollowRedirects: followRedirects,
 				Status:          model.StatusPending,
 				Active:          1,
@@ -826,10 +1076,16 @@ func NewServer(monitorService *monitor.Service, staticFS http.FileSystem) *Serve
 			var count int64
 			db.DB.Model(&model.Monitor{}).Where("name = ?", name).Count(&count)
 			if count > 0 {
-				client.Emit("notification", map[string]any{
-					"message": "监控项名称已存在，请使用唯一名称",
-					"type":    "error",
-				})
+				// Ack with error if callback exists
+				for _, arg := range args {
+					if ack, ok := arg.(func([]any, error)); ok {
+						ack([]any{map[string]any{
+							"ok":  false,
+							"msg": "监控项名称已存在，请使用唯一名称",
+						}}, nil)
+						return
+					}
+				}
 				return
 			}
 
@@ -897,10 +1153,16 @@ func NewServer(monitorService *monitor.Service, staticFS http.FileSystem) *Serve
 				var count int64
 				db.DB.Model(&model.Monitor{}).Where("name = ? AND id != ?", newName, id).Count(&count)
 				if count > 0 {
-					client.Emit("notification", map[string]any{
-						"message": "监控项名称已存在，请使用唯一名称",
-						"type":    "error",
-					})
+					// Ack with error if callback exists
+					for _, arg := range args {
+						if ack, ok := arg.(func([]any, error)); ok {
+							ack([]any{map[string]any{
+								"ok":  false,
+								"msg": "监控项名称已存在，请使用唯一名称",
+							}}, nil)
+							return
+						}
+					}
 					return
 				}
 			}
@@ -941,6 +1203,22 @@ func NewServer(monitorService *monitor.Service, staticFS http.FileSystem) *Serve
 			}
 
 			m.ResponseRegex = safeMapGetString(data, "response_regex")
+			// 响应正则验证智能转换：如果用户输入的是 JSON 格式，则提取键名转换为正则表达式存储
+			// 详细说明见 add 处理器中的注释
+			if m.ResponseRegex != "" && json.Valid([]byte(m.ResponseRegex)) {
+				keyRe := regexp.MustCompile(`"([^"\\]*(?:\\.[^"\\]*)*)"\s*:`)
+				matches := keyRe.FindAllStringSubmatch(m.ResponseRegex, -1)
+				if len(matches) > 0 {
+					var builder strings.Builder
+					builder.WriteString("(?s)\\{")
+					for _, match := range matches {
+						builder.WriteString(fmt.Sprintf(".*\"%s\"", match[1]))
+					}
+					builder.WriteString(".*\\}")
+					m.ResponseRegex = builder.String()
+				}
+			}
+			m.FormData = safeMapGetString(data, "form_data")
 
 			if fr, ok := data["follow_redirects"].(bool); ok {
 				m.FollowRedirects = fr
@@ -988,6 +1266,62 @@ func NewServer(monitorService *monitor.Service, staticFS http.FileSystem) *Serve
 			}
 
 			// Broadcast updated list
+			s.broadcastMonitorList()
+		})
+
+		// Handle "toggleActive" - 安全地只切换监控项的启用/暂停状态
+		requireAuth("toggleActive", func(args ...any) {
+			if len(args) < 2 {
+				return
+			}
+
+			// 类型安全检查，避免 panic
+			idFloat, ok := args[0].(float64)
+			if !ok {
+				return
+			}
+			activeFloat, ok := args[1].(float64)
+			if !ok {
+				return
+			}
+			id := uint(idFloat)
+			newActive := int(activeFloat)
+
+			var m model.Monitor
+			if err := db.DB.First(&m, id).Error; err != nil {
+				return
+			}
+
+			oldActive := m.Active
+			m.Active = newActive
+
+			if err := db.DB.Save(&m).Error; err != nil {
+				for _, arg := range args {
+					if ack, ok := arg.(func([]any, error)); ok {
+						ack([]any{map[string]any{"ok": false, "msg": err.Error()}}, nil)
+						return
+					}
+				}
+				return
+			}
+
+			// Handle monitor start/stop
+			if oldActive != newActive {
+				if newActive == 0 {
+					s.monitorService.StopMonitor(m.ID)
+				} else {
+					s.monitorService.StartMonitor(&m)
+				}
+			}
+
+			// Ack
+			for _, arg := range args {
+				if ack, ok := arg.(func([]any, error)); ok {
+					ack([]any{map[string]any{"ok": true}}, nil)
+					break
+				}
+			}
+
 			s.broadcastMonitorList()
 		})
 
@@ -1322,4 +1656,16 @@ func (s *Server) getMonitorStats(monitorID uint) map[string]any {
 	stats["avgResponse24h"] = db.GetAvgResponseTime(monitorID, 24*time.Hour)
 
 	return stats
+}
+
+// sanitizeFormData 验证form_data是否为有效的JSON数组格式
+func sanitizeFormData(s string) string {
+	if s == "" {
+		return ""
+	}
+	var arr []interface{}
+	if err := json.Unmarshal([]byte(s), &arr); err != nil {
+		return "" // 无效格式则返回空
+	}
+	return s
 }

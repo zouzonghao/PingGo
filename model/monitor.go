@@ -23,24 +23,24 @@ const (
 )
 
 type Monitor struct {
-	ID        uint           `gorm:"primaryKey" json:"id"`
-	CreatedAt time.Time      `json:"created_at"`
-	UpdatedAt time.Time      `json:"updated_at"`
-	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 
 	Name     string      `json:"name"`
 	URL      string      `json:"url"` // For HTTP/TCP
 	Type     MonitorType `json:"type"`
 	Method   string      `json:"method" gorm:"default:'GET'"`
 	Body     string      `json:"body"`
-	Headers  string      `json:"headers"` // JSON string
-	
+	Headers  string      `json:"headers"`   // JSON string
+	FormData string      `json:"form_data"` // JSON string [{"key": "foo", "value": "bar", "type": "text/file"}]
+
 	Timeout         int    `json:"timeout" gorm:"default:10"`
 	ExpectedStatus  int    `json:"expected_status" gorm:"default:0"` // 0 means 2xx
 	ResponseRegex   string `json:"response_regex"`
 	FollowRedirects bool   `json:"follow_redirects" gorm:"default:true"`
 
-	Interval int         `json:"interval"` // In seconds
+	Interval int `json:"interval"` // In seconds
 
 	Active int `json:"active" gorm:"default:1"`
 	Weight int `json:"weight" gorm:"default:2000"`
@@ -67,12 +67,12 @@ type Setting struct {
 }
 
 type Notification struct {
-	ID     uint           `gorm:"primaryKey" json:"id"`
-	Name   string         `json:"name"`
-	Type   string         `json:"type"` // always "email" for now
-	Config string         `json:"config"` // JSON string of config
-	Active bool           `json:"active" gorm:"default:true"`
-	UserID uint           `json:"userId"`
+	ID     uint   `gorm:"primaryKey" json:"id"`
+	Name   string `json:"name"`
+	Type   string `json:"type"`   // always "email" for now
+	Config string `json:"config"` // JSON string of config
+	Active bool   `json:"active" gorm:"default:true"`
+	UserID uint   `json:"userId"`
 }
 
 type Heartbeat struct {

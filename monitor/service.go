@@ -1,13 +1,16 @@
 package monitor
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"ping-go/config"
 	"ping-go/db"
 	"ping-go/model"
@@ -515,14 +518,14 @@ func (s *Service) Check(id uint) {
 		duration = int(time.Since(startTime).Milliseconds())
 	case model.MonitorTypePing:
 		var rtt time.Duration
-		status, msg, rtt = CheckPing(m.URL)
+		status, msg, rtt = CheckPing(m.URL, m.Timeout)
 		duration = int(rtt.Milliseconds())
 	case model.MonitorTypeTCP:
 		var tcpDuration time.Duration
-		status, msg, tcpDuration = CheckTCP(m.URL)
+		status, msg, tcpDuration = CheckTCP(m.URL, m.Timeout)
 		duration = int(tcpDuration.Milliseconds())
 	case model.MonitorTypeDNS:
-		status, msg = CheckDNS(m.URL)
+		status, msg = CheckDNS(m.URL, m.Timeout)
 		duration = int(time.Since(startTime).Milliseconds())
 	default:
 		// Default to HTTP if unknown or fallback
@@ -613,8 +616,8 @@ var defaultTransport = &http.Transport{
 	DisableKeepAlives:   false,
 	DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 		dialer := &net.Dialer{
-			Timeout:   30 * time.Second,
-			KeepAlive: 30 * time.Second,
+			Timeout:   0,                // Rely on context timeout
+			KeepAlive: 30 * time.Second, // Keep-alive is fine to stay at 30s as it doesn't affect detection timeout
 			Resolver:  getCustomResolver(),
 		}
 		return dialer.DialContext(ctx, network, addr)
@@ -662,11 +665,11 @@ func initHTTPClients() {
 	httpClientOnce.Do(func() {
 		httpClient = &http.Client{
 			Transport: defaultTransport,
-			Timeout:   30 * time.Second, // Default timeout, check level overrides context
+			Timeout:   600 * time.Second, // 10 minutes max as safety net (actual timeout via context)
 		}
 		httpClientNoRedirect = &http.Client{
 			Transport: defaultTransport,
-			Timeout:   30 * time.Second,
+			Timeout:   600 * time.Second, // 10 minutes max as safety net
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				return http.ErrUseLastResponse
 			},
@@ -697,7 +700,54 @@ func CheckHTTP(m model.Monitor) (int, string) {
 	}
 
 	var body io.Reader
-	if m.Body != "" {
+	contentType := ""
+
+	isFormMethod := strings.EqualFold(method, "POST") || strings.EqualFold(method, "PUT") || strings.EqualFold(method, "PATCH")
+	if isFormMethod && m.FormData != "" {
+		var fields []struct {
+			Key   string `json:"key"`
+			Value string `json:"value"`
+			Type  string `json:"type"` // "text" or "file"
+		}
+		if err := json.Unmarshal([]byte(m.FormData), &fields); err == nil && len(fields) > 0 {
+			bodyBuffer := &bytes.Buffer{}
+			writer := multipart.NewWriter(bodyBuffer)
+			for _, field := range fields {
+				if field.Type == "file" {
+					// Security Check: Force relative path and disallow traversing up
+					if filepath.IsAbs(field.Value) || strings.Contains(field.Value, "..") {
+						return model.StatusDown, fmt.Sprintf("Invalid file path: %s (must be relative and cannot contain '..')", field.Value)
+					}
+
+					// Read file from current working directory
+					wd, _ := os.Getwd()
+					filePath := filepath.Join(wd, field.Value)
+
+					file, err := os.Open(filePath)
+					if err != nil {
+						return model.StatusDown, fmt.Sprintf("Open file failed: %v", err)
+					}
+					part, err := writer.CreateFormFile(field.Key, filepath.Base(filePath))
+					if err != nil {
+						file.Close()
+						return model.StatusDown, fmt.Sprintf("Create form file failed: %v", err)
+					}
+					_, err = io.Copy(part, file)
+					file.Close()
+					if err != nil {
+						return model.StatusDown, fmt.Sprintf("Copy file content failed: %v", err)
+					}
+				} else {
+					_ = writer.WriteField(field.Key, field.Value)
+				}
+			}
+			writer.Close()
+			body = bodyBuffer
+			contentType = writer.FormDataContentType()
+		}
+	}
+
+	if body == nil && m.Body != "" {
 		body = strings.NewReader(m.Body)
 	}
 
@@ -708,6 +758,10 @@ func CheckHTTP(m model.Monitor) (int, string) {
 
 	client := getHTTPClient(m.FollowRedirects)
 
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+
 	// Add Headers
 	if m.Headers != "" {
 		var headers map[string]string
@@ -715,6 +769,9 @@ func CheckHTTP(m model.Monitor) (int, string) {
 		if err == nil && len(headers) > 0 {
 			// JSON format
 			for k, v := range headers {
+				if contentType != "" && strings.EqualFold(k, "Content-Type") {
+					continue
+				}
 				req.Header.Set(k, v)
 			}
 		} else {
@@ -805,13 +862,15 @@ func CheckHTTP(m model.Monitor) (int, string) {
 	}
 
 	// Check Regex
+	// 响应正则验证：数据库中存储的始终是正则表达式（JSON 输入已在服务端转换）
 	if m.ResponseRegex != "" {
-		// Read body (limit to 1MB for regex matching correctness)
+		// Read body (limit to 1MB)
 		bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
 		if err != nil {
 			return model.StatusDown, fmt.Sprintf("Read body failed: %v", err)
 		}
 		bodyStr := string(bodyBytes)
+
 		matched, err := regexp.MatchString(m.ResponseRegex, bodyStr)
 		if err != nil {
 			return model.StatusDown, fmt.Sprintf("Regex error: %v", err)
@@ -819,17 +878,20 @@ func CheckHTTP(m model.Monitor) (int, string) {
 		if !matched {
 			msg := "响应不匹配！"
 			if len(bodyStr) > 0 {
-				// Truncate to 300 chars for message
-				msg += fmt.Sprintf(". Body: %s", truncateBody(strings.TrimSpace(bodyStr)))
+				msg += fmt.Sprintf(" Body: %s", truncateBody(strings.TrimSpace(bodyStr)))
 			}
 			return model.StatusDown, msg
 		}
 	}
 
-	return model.StatusUp, fmt.Sprintf("HTTP %d %s", resp.StatusCode, http.StatusText(resp.StatusCode))
+	msg := fmt.Sprintf("HTTP %d %s", resp.StatusCode, http.StatusText(resp.StatusCode))
+	if m.ResponseRegex != "" {
+		msg += "，正则匹配成功！"
+	}
+	return model.StatusUp, msg
 }
 
-func CheckPing(addr string) (int, string, time.Duration) {
+func CheckPing(addr string, timeoutSec int) (int, string, time.Duration) {
 	pinger, err := probing.NewPinger(addr)
 	if err != nil {
 		return model.StatusDown, fmt.Sprintf("Init ping failed: %v", err), 0
@@ -844,7 +906,12 @@ func CheckPing(addr string) (int, string, time.Duration) {
 
 	pinger.Count = 3
 	pinger.Interval = 100 * time.Millisecond // Reduce wait between packets
-	pinger.Timeout = DefaultPingTimeout
+
+	timeout := time.Duration(timeoutSec) * time.Second
+	if timeout <= 0 {
+		timeout = DefaultPingTimeout
+	}
+	pinger.Timeout = timeout
 
 	err = pinger.Run() // blocks
 	if err != nil {
@@ -864,9 +931,13 @@ func CheckPing(addr string) (int, string, time.Duration) {
 	return model.StatusUp, msg, stats.AvgRtt
 }
 
-func CheckTCP(addr string) (int, string, time.Duration) {
+func CheckTCP(addr string, timeoutSec int) (int, string, time.Duration) {
+	timeout := time.Duration(timeoutSec) * time.Second
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
 	dialer := net.Dialer{
-		Timeout:  10 * time.Second,
+		Timeout:  timeout,
 		Resolver: getCustomResolver(),
 	}
 	start := time.Now()
@@ -889,13 +960,20 @@ func CheckTCP(addr string) (int, string, time.Duration) {
 	return model.StatusUp, msg, duration
 }
 
-func CheckDNS(domain string) (int, string) {
+func CheckDNS(domain string, timeoutSec int) (int, string) {
+	timeout := time.Duration(timeoutSec) * time.Second
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
 	resolver := getCustomResolver()
 	if resolver == nil {
 		resolver = net.DefaultResolver
 	}
 
-	ips, err := resolver.LookupIP(context.Background(), "ip", domain)
+	ips, err := resolver.LookupIP(ctx, "ip", domain)
 	if err != nil {
 		errStr := err.Error()
 		if strings.Contains(errStr, "no such host") {
@@ -917,4 +995,126 @@ func CheckDNS(domain string) (int, string) {
 		return model.StatusDown, "No IP found"
 	}
 	return model.StatusUp, fmt.Sprintf("IP: %v", ips[0])
+}
+
+// TestHTTP performs a request but returns the raw status code and body for testing purposes.
+func TestHTTP(m model.Monitor) (int, string) {
+	timeout := m.Timeout
+	if timeout <= 0 {
+		timeout = 10
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
+	defer cancel()
+
+	method := m.Method
+	if method == "" {
+		method = "GET"
+	}
+
+	var body io.Reader
+	contentType := ""
+
+	isFormMethod := strings.EqualFold(method, "POST") || strings.EqualFold(method, "PUT") || strings.EqualFold(method, "PATCH")
+	if isFormMethod && m.FormData != "" {
+		var fields []struct {
+			Key   string `json:"key"`
+			Value string `json:"value"`
+			Type  string `json:"type"` // "text" or "file"
+		}
+		if err := json.Unmarshal([]byte(m.FormData), &fields); err == nil && len(fields) > 0 {
+			bodyBuffer := &bytes.Buffer{}
+			writer := multipart.NewWriter(bodyBuffer)
+			for _, field := range fields {
+				if field.Type == "file" {
+					// Security Check: Force relative path and disallow traversing up
+					if filepath.IsAbs(field.Value) || strings.Contains(field.Value, "..") {
+						return 0, fmt.Sprintf("Invalid file path: %s (must be relative and cannot contain '..')", field.Value)
+					}
+					// Read file from current working directory
+					wd, _ := os.Getwd()
+					filePath := filepath.Join(wd, field.Value)
+
+					file, err := os.Open(filePath)
+					if err != nil {
+						return 0, fmt.Sprintf("Open file failed: %v", err)
+					}
+					part, err := writer.CreateFormFile(field.Key, filepath.Base(filePath))
+					if err != nil {
+						file.Close()
+						return 0, fmt.Sprintf("Create form file failed: %v", err)
+					}
+					_, err = io.Copy(part, file)
+					file.Close()
+					if err != nil {
+						return 0, fmt.Sprintf("Copy file content failed: %v", err)
+					}
+				} else {
+					_ = writer.WriteField(field.Key, field.Value)
+				}
+			}
+			writer.Close()
+			body = bodyBuffer
+			contentType = writer.FormDataContentType()
+		}
+	}
+
+	if body == nil && m.Body != "" {
+		body = strings.NewReader(m.Body)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, m.URL, body)
+	if err != nil {
+		return 0, fmt.Sprintf("Create request failed: %v", err)
+	}
+
+	client := getHTTPClient(m.FollowRedirects)
+
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+
+	// Add Headers
+	if m.Headers != "" {
+		var headers map[string]string
+		err := json.Unmarshal([]byte(m.Headers), &headers)
+		if err == nil && len(headers) > 0 {
+			for k, v := range headers {
+				if contentType != "" && strings.EqualFold(k, "Content-Type") {
+					continue
+				}
+				req.Header.Set(k, v)
+			}
+		} else {
+			pairs := strings.Split(m.Headers, ",")
+			for _, pair := range pairs {
+				kv := strings.SplitN(pair, "=", 2)
+				if len(kv) == 2 {
+					key := strings.TrimSpace(kv[0])
+					value := strings.TrimSpace(kv[1])
+					if key != "" {
+						req.Header.Set(key, value)
+					}
+				}
+			}
+		}
+	}
+
+	if req.Header.Get("User-Agent") == "" {
+		req.Header.Set("User-Agent", "PingGo-Monitor/1.0")
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, err.Error()
+	}
+	defer resp.Body.Close()
+
+	// Read body (limit to 10KB for test preview)
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 10240))
+	if err != nil {
+		return resp.StatusCode, fmt.Sprintf("Read body failed: %v", err)
+	}
+
+	return resp.StatusCode, string(bodyBytes)
 }

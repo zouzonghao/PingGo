@@ -198,6 +198,27 @@
                     暂无监控项
                 </div>
             </div>
+
+            <!-- Sidebar Footer: Import/Export (Option B) -->
+            <div class="px-4 py-3 border-t border-gray-100 bg-gray-50/50 flex items-center gap-2">
+                <button @click="importConfig"
+                    class="flex-1 flex items-center justify-center gap-1.5 py-2 px-2 bg-white border border-gray-200 rounded-lg text-[11px] font-bold text-gray-500 hover:text-primary hover:border-primary/30 transition shadow-sm">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12">
+                        </path>
+                    </svg>
+                    导入
+                </button>
+                <button @click="exportConfig"
+                    class="flex-1 flex items-center justify-center gap-1.5 py-2 px-2 bg-white border border-gray-200 rounded-lg text-[11px] font-bold text-gray-500 hover:text-primary hover:border-primary/30 transition shadow-sm">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                    </svg>
+                    导出
+                </button>
+            </div>
         </aside>
 
         <!-- Main Content -->
@@ -206,10 +227,12 @@
             <!-- Chart Container - Always in DOM, controlled by x-show to prevent Chart.js errors -->
             <div x-show="dashboardView === 'details' && currentMonitor" x-cloak class="max-w-6xl mx-auto space-y-6">
                 <!-- Top Info -->
-                <div class="flex justify-between items-start" x-show="currentMonitor">
+                <div class="flex flex-col min-[1240px]:flex-row justify-between min-[1240px]:items-start gap-6"
+                    x-show="currentMonitor">
                     <div>
                         <div class="flex items-center gap-3 mb-1">
-                            <h2 class="text-3xl font-bold text-gray-900" x-text="currentMonitor?.name"></h2>
+                            <h2 class="text-2xl font-bold text-gray-900 max-w-[300px] truncate cursor-help"
+                                :title="currentMonitor?.name" x-text="currentMonitor?.name"></h2>
                             <span
                                 class="px-2 py-1 rounded bg-gray-100 text-gray-500 text-[11px] font-bold uppercase tracking-wider"
                                 x-text="currentMonitor?.type"></span>
@@ -219,7 +242,7 @@
                         <a :href="currentMonitor?.url" target="_blank"
                             class="text-primary hover:underline text-sm font-medium" x-text="currentMonitor?.url"></a>
                     </div>
-                    <div class="flex gap-2">
+                    <div class="flex flex-wrap gap-2">
                         <button @click="togglePause(currentMonitor)"
                             class="flex items-center gap-1 px-4 py-2 bg-white border border-gray-200 rounded-lg text-sm font-semibold hover:bg-gray-50 transition"
                             :class="currentMonitor?.active ? '' : 'text-primary border-primary/30'">
@@ -541,20 +564,90 @@
                             </div>
 
                             <!-- Body field: Only show for methods that support body (not GET, HEAD, OPTIONS) -->
-                            <div x-show="!['GET', 'HEAD', 'OPTIONS'].includes(monitorForm.method)" class="space-y-2">
-                                <label class="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">请求体
-                                    (Body)</label>
-                                <textarea x-model="monitorForm.body" rows="3"
-                                    class="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition font-mono text-sm"
-                                    placeholder='{"key": "value"}'></textarea>
-                                <p class="text-[10px] text-gray-400 mt-1">仅适用于 POST/PUT/PATCH/DELETE 等带 Body 的请求</p>
+                            <!-- Body field: Only show for methods that support body (not GET, HEAD, OPTIONS) -->
+                            <div x-show="!['GET', 'HEAD', 'OPTIONS'].includes(monitorForm.method)" class="space-y-6">
+                                <template x-if="!['POST', 'PUT', 'PATCH'].includes(monitorForm.method)">
+                                    <div class="space-y-2">
+                                        <label
+                                            class="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">请求体
+                                            (Body)</label>
+                                        <textarea x-model="monitorForm.body" rows="3"
+                                            class="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition font-mono text-sm"
+                                            placeholder='{"key": "value"}'></textarea>
+                                        <p class="text-[10px] text-gray-400 mt-1">仅适用于 DELETE 等带 Body 的请求</p>
+                                    </div>
+                                </template>
+
+                                <!-- POST/PUT/PATCH Request: Toggle between Raw Body and Form Data -->
+                                <template x-if="['POST', 'PUT', 'PATCH'].includes(monitorForm.method)">
+                                    <div class="space-y-6">
+                                        <!-- Form Data (multipart/form-data) -->
+                                        <div class="space-y-4">
+                                            <div class="flex items-center justify-between">
+                                                <label
+                                                    class="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">表单数据
+                                                    (Form Data / -F)</label>
+                                                <button @click="addFormField()" type="button"
+                                                    class="text-xs font-bold text-primary hover:underline flex items-center gap-1">
+                                                    <svg class="w-3 h-3" fill="none" stroke="currentColor"
+                                                        viewBox="0 0 24 24">
+                                                        <path stroke-linecap="round" stroke-linejoin="round"
+                                                            stroke-width="2" d="M12 4v16m8-8H4"></path>
+                                                    </svg>
+                                                    增加字段
+                                                </button>
+                                            </div>
+
+                                            <div class="space-y-3">
+                                                <template x-for="(field, index) in monitorForm.formFields" :key="index">
+                                                    <div class="flex items-center gap-3">
+                                                        <input x-model="field.key" placeholder="Key (如：file)"
+                                                            class="flex-1 bg-gray-50 border border-gray-200 rounded-xl py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
+                                                        <input x-model="field.value"
+                                                            :placeholder="field.type === 'file' ? '相对路径文件名 (如：data.txt)' : 'Value'"
+                                                            class="flex-[2] bg-gray-50 border border-gray-200 rounded-xl py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
+                                                        <select x-model="field.type"
+                                                            class="bg-gray-50 border border-gray-200 rounded-xl py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary w-24">
+                                                            <option value="text">Text</option>
+                                                            <option value="file">File</option>
+                                                        </select>
+                                                        <button @click="removeFormField(index)" type="button"
+                                                            class="text-gray-300 hover:text-danger p-1">
+                                                            <svg class="w-4 h-4" fill="none" stroke="currentColor"
+                                                                viewBox="0 0 24 24">
+                                                                <path stroke-linecap="round" stroke-linejoin="round"
+                                                                    stroke-width="2"
+                                                                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-4v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16">
+                                                                </path>
+                                                            </svg>
+                                                        </button>
+                                                    </div>
+                                                </template>
+                                                <div x-show="monitorForm.formFields.length === 0"
+                                                    class="text-[10px] text-gray-400 p-4 border border-dashed border-gray-200 rounded-xl text-center bg-gray-50/50">
+                                                    未添加表单数据。如果为空且下方 Body 有内容，将使用 Raw Body 发送。
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <!-- Raw Body (as fallback) -->
+                                        <div class="space-y-2" x-show="monitorForm.formFields.length === 0">
+                                            <label
+                                                class="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">原始请求体
+                                                (Raw Body / -d)</label>
+                                            <textarea x-model="monitorForm.body" rows="3"
+                                                class="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition font-mono text-sm"
+                                                placeholder='{"key": "value"}'></textarea>
+                                        </div>
+                                    </div>
+                                </template>
                             </div>
 
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
                                 <!-- Response Regex: Only show for methods that have response body (not HEAD) -->
                                 <div x-show="monitorForm.method !== 'HEAD'" class="space-y-2">
-                                    <label
-                                        class="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">响应正则验证</label>
+                                    <label class="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">响应正则验证
+                                        (支持 JSON)</label>
                                     <input x-model="monitorForm.response_regex"
                                         class="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition"
                                         type="text" placeholder="^OK$">
@@ -572,6 +665,18 @@
                         <div class="flex justify-end gap-4 pt-6 border-t border-gray-100">
                             <button @click="dashboardView = 'details'" type="button"
                                 class="px-8 py-3 rounded-xl text-gray-500 font-bold hover:bg-gray-50 transition">取消</button>
+                            <button @click="testMonitor" type="button" :disabled="isTesting"
+                                class="px-8 py-3 bg-indigo-500 text-white rounded-xl font-bold hover:opacity-90 transition shadow-lg shadow-indigo-500/20 flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed">
+                                <svg x-show="isTesting" class="animate-spin h-5 w-5 text-white"
+                                    xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor"
+                                        stroke-width="4"></circle>
+                                    <path class="opacity-75" fill="currentColor"
+                                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
+                                    </path>
+                                </svg>
+                                <span x-text="isTesting ? '测试中...' : '测试'"></span>
+                            </button>
                             <button type="submit"
                                 class="px-12 py-3 bg-primary text-white rounded-xl font-bold shadow-lg shadow-primary/20 hover:opacity-90 transition transform active:scale-[0.98]">
                                 <span x-text="isEditing ? '保存修改' : '立即添加'"></span>
@@ -584,7 +689,7 @@
             <!-- Overview View -->
             <template x-if="dashboardView === 'overview'">
                 <div class="max-w-6xl mx-auto space-y-8">
-                    <div class="flex flex-col gap-2">
+                    <div class="flex flex-col gap-2 text-left">
                         <h2 class="text-3xl font-bold text-gray-900">系统总览</h2>
                         <p class="text-gray-500">所有监控项的实时运行状态汇总</p>
                     </div>
@@ -1118,7 +1223,7 @@
                 </div>
 
                 <h3 class="text-xl font-black text-gray-900 mb-2" x-text="msgBox.title"></h3>
-                <p class="text-sm text-gray-500 leading-relaxed" x-text="msgBox.message"></p>
+                <div class="text-sm text-gray-500 leading-relaxed" x-html="msgBox.message"></div>
             </div>
 
             <!-- Buttons -->

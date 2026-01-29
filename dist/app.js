@@ -8,6 +8,7 @@ function app() {
         heartbeats: [],
         showAdvanced: false,
         isEditing: false,
+        isTesting: false,
         isEditingNotif: false,
         searchText: '',
         setupForm: { username: '', password: '', confirmPassword: '' },
@@ -36,7 +37,8 @@ function app() {
             follow_redirects: true,
             headers: '',
             body: '',
-            response_regex: ''
+            response_regex: '',
+            formFields: [] // {key: '', value: '', type: 'text'}
         },
 
         get filteredMonitors() {
@@ -154,6 +156,18 @@ function app() {
             }
 
             this.showAlert('错误', msg, type);
+        },
+
+        escapeHtml(str) {
+            if (!str) return '';
+            const map = {
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            };
+            return String(str).replace(/[&<>"']/g, m => map[m]);
         },
 
         init() {
@@ -321,8 +335,39 @@ function app() {
                 this.socket.emit('getMonitorList');
             });
 
+            this.socket.on('notification', (data) => {
+                this.showAlert(data.type === 'error' ? '错误' : '通知', data.message, data.type || 'info');
+            });
+
             this.socket.on('notificationList', (list) => {
                 this.notifications = list || [];
+            });
+
+            this.socket.on('monitorConfigExport', (monitors) => {
+                // Clean data for export
+                const exportData = monitors.map(m => ({
+                    name: m.name,
+                    url: m.url,
+                    type: m.type,
+                    interval: m.interval,
+                    method: m.method,
+                    body: m.body,
+                    headers: m.headers,
+                    form_data: m.form_data,
+                    timeout: m.timeout,
+                    expected_status: m.expected_status,
+                    response_regex: m.response_regex,
+                    follow_redirects: m.follow_redirects,
+                    active: m.active
+                }));
+
+                const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportData, null, 2));
+                const downloadAnchorNode = document.createElement('a');
+                downloadAnchorNode.setAttribute("href", dataStr);
+                downloadAnchorNode.setAttribute("download", "pinggo_monitors_" + new Date().toISOString().slice(0, 10) + ".json");
+                document.body.appendChild(downloadAnchorNode); // required for firefox
+                downloadAnchorNode.click();
+                downloadAnchorNode.remove();
             });
         },
 
@@ -423,6 +468,52 @@ function app() {
             }, true, '删除');
         },
 
+        exportConfig() {
+            this.socket.emit('exportMonitorConfig');
+        },
+
+        importConfig() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.json';
+            input.onchange = e => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = event => {
+                    try {
+                        const json = JSON.parse(event.target.result);
+                        if (!Array.isArray(json)) {
+                            this.showAlert('导入失败', '文件格式错误：必须是 JSON 数组', 'error');
+                            return;
+                        }
+                        this.socket.emit('importMonitorConfig', json, (res) => {
+                            if (res.ok) {
+                                let msg = `<div class="text-left">成功导入 <span class="text-emerald-600 font-bold">${res.imported}</span> 个监控项。`;
+                                if (res.skipped > 0) {
+                                    msg += `<div class="mt-4 pt-3 border-t border-gray-100">
+                                              <div class="text-amber-600 font-bold text-[11px] uppercase tracking-wider mb-2">跳过 ${res.skipped} 个重名项</div>
+                                              <div class="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto pr-1">
+                                                ${res.skippedNames.map(name => `<span class="px-2 py-0.5 bg-amber-50 text-amber-700 rounded-md text-[10px] border border-amber-100 font-medium">${this.escapeHtml(name)}</span>`).join('')}
+                                              </div>
+                                            </div>`;
+                                }
+                                msg += `</div>`;
+                                this.showAlert('导入完成', msg, res.skipped > 0 ? 'warning' : 'success');
+                                this.socket.emit('getMonitorList');
+                            } else {
+                                this.showAlert('导入失败', res.msg || '服务器返回错误', 'error');
+                            }
+                        });
+                    } catch (err) {
+                        this.showAlert('导入失败', 'JSON 解析错误', 'error');
+                    }
+                };
+                reader.readAsText(file);
+            };
+            input.click();
+        },
+
         doSetup() {
             if (this.setupForm.password !== this.setupForm.confirmPassword) {
                 this.showAlert('密码错误', '两次输入的密码不一致！', 'warning');
@@ -476,7 +567,8 @@ function app() {
                 follow_redirects: true,
                 headers: '',
                 body: '',
-                response_regex: ''
+                response_regex: '',
+                formFields: []
             };
         },
 
@@ -503,7 +595,8 @@ function app() {
                         follow_redirects: data.follow_redirects !== undefined ? data.follow_redirects : true,
                         headers: data.headers || '',
                         body: data.body || '',
-                        response_regex: data.response_regex || ''
+                        response_regex: data.response_regex || '',
+                        formFields: this.parseFormFields(data.form_data)
                     };
                     this.socket.off('monitor', onMonitorData); // Clean up listener
                 }
@@ -531,7 +624,8 @@ function app() {
                         follow_redirects: data.follow_redirects !== undefined ? data.follow_redirects : true,
                         headers: data.headers || '',
                         body: data.body || '',
-                        response_regex: data.response_regex || ''
+                        response_regex: data.response_regex || '',
+                        formFields: this.parseFormFields(data.form_data)
                     };
                     this.socket.off('monitor', onMonitorData);
                 }
@@ -541,7 +635,8 @@ function app() {
 
         togglePause(m) {
             const newActive = m.active ? 0 : 1;
-            this.socket.emit('edit', { ...m, active: newActive }, (res) => {
+            // 只发送id和active，避免覆盖敏感配置数据
+            this.socket.emit('toggleActive', m.id, newActive, (res) => {
                 if (res.ok) {
                     m.active = newActive;
                     this.socket.emit('getMonitorList');
@@ -591,16 +686,45 @@ function app() {
         },
 
         saveMonitor() {
+            // Convert formFields to JSON string for backend
+            const monitorData = { ...this.monitorForm };
+            monitorData.form_data = JSON.stringify(this.monitorForm.formFields);
+            delete monitorData.formFields;
+
             const event = this.isEditing ? 'edit' : 'add';
-            this.socket.emit(event, this.monitorForm, (res) => {
+            this.socket.emit(event, monitorData, (res) => {
                 if (res.ok) {
                     this.dashboardView = 'details';
                     this.socket.emit('getMonitorList');
-                    if (this.isEditing && this.currentMonitor && this.currentMonitor.id === this.monitorForm.id) {
-                        Object.assign(this.currentMonitor, this.monitorForm);
+                    // Refresh currentMonitor with fresh data from server to ensure consistency
+                    if (res.monitorID) {
+                        this.socket.emit('getMonitor', res.monitorID);
+                    } else if (this.isEditing && this.currentMonitor && this.currentMonitor.id === this.monitorForm.id) {
+                        this.socket.emit('getMonitor', this.monitorForm.id);
                     }
                 } else {
                     this.showAlert('保存失败', res.msg, 'error');
+                }
+            });
+        },
+
+        testMonitor() {
+            this.isTesting = true;
+            // Convert formFields to JSON string for backend
+            const monitorData = { ...this.monitorForm };
+            monitorData.form_data = JSON.stringify(this.monitorForm.formFields);
+            delete monitorData.formFields;
+
+            this.socket.emit('testMonitor', monitorData, (res) => {
+                this.isTesting = false;
+                if (res && res.ok) {
+                    let content = `状态码: ${res.status}\n\n响应信息:\n${res.msg}`;
+                    if (monitorData.type !== 'http') {
+                        content = `响应信息:\n${res.msg}`;
+                    }
+                    this.openMsgDetail(content);
+                } else {
+                    this.showAlert('测试失败', res ? res.msg : '未知错误', 'error');
                 }
             });
         },
@@ -643,6 +767,24 @@ function app() {
                 case 2: return 'bg-amber-500'; // PENDING
                 case 3: return 'bg-blue-500'; // MAINTENANCE
                 default: return 'bg-slate-400';
+            }
+        },
+
+        addFormField() {
+            this.monitorForm.formFields.push({ key: '', value: '', type: 'text' });
+        },
+
+        removeFormField(index) {
+            this.monitorForm.formFields.splice(index, 1);
+        },
+
+        parseFormFields(formData) {
+            if (!formData) return [];
+            try {
+                const parsed = JSON.parse(formData);
+                return Array.isArray(parsed) ? parsed : [];
+            } catch (e) {
+                return [];
             }
         },
 
