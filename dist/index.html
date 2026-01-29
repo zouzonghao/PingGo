@@ -50,13 +50,16 @@
     </style>
 </head>
 
-<body class="min-h-screen font-sans text-endpoint" x-data="statusApp()">
-    <div class="max-w-7xl mx-auto px-6 py-8 md:py-12">
+<body class="min-h-screen font-sans text-endpoint flex flex-col" x-data="statusApp()">
+    <div class="flex-grow max-w-7xl mx-auto px-6 py-8 md:py-12 w-full">
         <!-- Header -->
         <header class="flex justify-between items-start mb-8">
-            <div>
-                <h1 class="text-3xl font-bold text-title mb-1">服务状态监控</h1>
-                <p class="text-sm text-subtitle">实时监控您的服务端点健康状况</p>
+            <div class="flex items-center gap-4">
+                <img src="assets/favicon.avif" alt="Logo" class="w-14 h-14 rounded-2xl shadow-sm ml-1">
+                <div>
+                    <h1 class="text-3xl font-bold text-title mb-1">PingGo</h1>
+                    <p class="text-sm text-subtitle">实时监控服务健康状况</p>
+                </div>
             </div>
             <div class="flex items-center gap-4">
                 <a href="/dashboard"
@@ -164,7 +167,19 @@
         <div x-show="filteredMonitors.length === 0" class="py-20 text-center bg-white rounded-xl border border-border">
             <p class="text-secondary font-medium">未找到符合条件的端点。</p>
         </div>
+
     </div>
+
+    <!-- Footer -->
+    <footer class="py-6 text-center border-t border-gray-100 bg-gray-50/30">
+        <p class="text-[11px] text-gray-400 font-medium tracking-wide">
+            &copy; 2026 PingGo. Powered by
+            <a href="https://github.com/zouzonghao/PingGo" target="_blank"
+                class="hover:text-gray-600 transition-colors">
+                zouzonghao/PingGo
+            </a>
+        </p>
+    </footer>
 
     <script src="index.js"></script>
 </body>
