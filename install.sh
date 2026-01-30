@@ -244,8 +244,8 @@ install_service() {
     curl -L -o "$TEMP_FILE" "$DOWNLOAD_URL" || die "下载文件失败。"
 
     info "解压文件到 ${INSTALL_DIR}..."
-    # 保留数据库和配置文件
-    find "$INSTALL_DIR" -mindepth 1 ! -name 'pinggo.db' ! -name 'config.yaml' -exec rm -rf {} + 2>/dev/null || true
+    # 只删除旧的可执行文件，保留其他所有文件（如数据库、配置、日志等）
+    rm -f "${INSTALL_DIR}/${EXECUTABLE_NAME}"
     tar -xzf "$TEMP_FILE" -C "$INSTALL_DIR" || die "解压文件失败。"
 
     # 重命名可执行文件

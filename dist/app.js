@@ -1,5 +1,73 @@
+// 全局工具函数，确保在任何地方（包括 Alpine 模板）都能访问
+function statusText(status, active = 1) {
+    if (active === 0) return '已暂停';
+    switch (status) {
+        case 1: return '正常';
+        case 0: return '中断';
+        case 2: return '检查中';
+        case 3: return '维护中';
+        default: return '未知';
+    }
+}
+
+function statusTextClass(status, active = 1) {
+    if (active === 0) return 'text-gray-500';
+    switch (status) {
+        case 1: return 'text-emerald-600';
+        case 0: return 'text-rose-600';
+        case 2: return 'text-amber-600';
+        case 3: return 'text-blue-600';
+        default: return 'text-slate-500';
+    }
+}
+
+function formatDuration(seconds) {
+    if (!seconds) return '0秒';
+    if (seconds < 60) return seconds + '秒';
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return s > 0 ? `${m}分${s}秒` : `${m}分钟`;
+}
+
+function formatDate(dateStr) {
+    if (!dateStr) return '';
+    const date = new Date(dateStr);
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    const h = String(date.getHours()).padStart(2, '0');
+    const min = String(date.getMinutes()).padStart(2, '0');
+    const s = String(date.getSeconds()).padStart(2, '0');
+    return `${y}-${m}-${d} ${h}:${min}:${s}`;
+}
+
+function formatTime(dateStr, includeDate = false, includeSeconds = false) {
+    if (!dateStr) return '';
+    const date = new Date(dateStr);
+    const h = String(date.getHours()).padStart(2, '0');
+    const min = String(date.getMinutes()).padStart(2, '0');
+    let timePart = `${h}:${min}`;
+    if (includeSeconds) {
+        const s = String(date.getSeconds()).padStart(2, '0');
+        timePart += `:${s}`;
+    }
+    if (includeDate) {
+        const m = String(date.getMonth() + 1).padStart(2, '0');
+        const d = String(date.getDate()).padStart(2, '0');
+        return `${m}/${d} ${timePart}`;
+    }
+    return timePart;
+}
+
 function app() {
     return {
+        // Expose global helpers to Alpine scope
+        statusText,
+        statusTextClass,
+        formatDuration,
+        formatDate,
+        formatTime,
+
         socket: null,
         page: 'loading',
         monitors: [],
@@ -33,13 +101,17 @@ function app() {
             interval: 60,
             method: 'GET',
             timeout: 10,
-            expected_status: 0,
+            expected_status: 200,
             follow_redirects: true,
             headers: '',
             body: '',
+            bodyType: 'application/json',
             response_regex: '',
-            formFields: [] // {key: '', value: '', type: 'text'}
+            formFields: [], // {key: '', value: '', type: 'text'}
+            headerFields: [], // {key: '', value: ''}
+            queryFields: [] // {key: '', value: ''}
         },
+        _syncingHeaders: false,
 
         get filteredMonitors() {
             if (!this.searchText) return this.monitors;
@@ -255,6 +327,9 @@ function app() {
                     // 更新状态和消息
                     m.status = hb.status;
                     m.msg = hb.msg;
+                    // Store raw and formatted time
+                    m.lastHeartbeatRaw = hb.time;
+                    m.lastHeartbeatTime = this.formatDate(hb.time);
 
                     // 更新最近检查结果 (Uptime History条纹图)
                     if (!m.recentResults) m.recentResults = Array(30).fill(-1);
@@ -271,6 +346,9 @@ function app() {
                 // 如果是当前选中的监控项，更新详情页
                 if (this.currentMonitor && this.currentMonitor.id === hb.monitorID) {
                     // 更新心跳列表（最近事件）
+                    // Format time for display
+                    hb.rawTime = hb.time;
+                    hb.time = this.formatDate(hb.time);
                     this.heartbeats.unshift(hb);
                     if (this.heartbeats.length > 30) this.heartbeats.pop();
 
@@ -293,7 +371,11 @@ function app() {
 
             this.socket.on('heartbeatList', (monitorID, list) => {
                 if (this.currentMonitor && this.currentMonitor.id === monitorID) {
-                    this.heartbeats = list;
+                    this.heartbeats = list.map(h => ({
+                        ...h,
+                        rawTime: h.time,
+                        time: this.formatDate(h.time)
+                    }));
                     // Cancel any pending chart initialization
                     if (this.chartInitTimeout) {
                         clearTimeout(this.chartInitTimeout);
@@ -368,6 +450,61 @@ function app() {
                 document.body.appendChild(downloadAnchorNode); // required for firefox
                 downloadAnchorNode.click();
                 downloadAnchorNode.remove();
+            });
+
+            // Headers Bidirectional Binding
+            this.$watch('monitorForm.headers', (val) => {
+                if (this._syncingHeaders) return;
+                this._syncingHeaders = true;
+                try {
+                    const parsed = JSON.parse(val || '{}');
+                    const fields = Object.entries(parsed).map(([key, value]) => ({ key, value: String(value) }));
+
+                    // 只在数据真正变化时更新（过滤掉正在编辑的空字段）
+                    const currentFieldsData = this.monitorForm.headerFields.filter(f => f.key);
+                    if (JSON.stringify(currentFieldsData) !== JSON.stringify(fields)) {
+                        this.monitorForm.headerFields = fields;
+                    }
+                } catch (e) {
+                    // Invalid JSON, don't update fields
+                }
+                this._syncingHeaders = false;
+            });
+
+            this.$watch('monitorForm.headerFields', (val) => {
+                if (this._syncingHeaders) return;
+                this._syncingHeaders = true;
+                const headersObj = {};
+                val.forEach(f => {
+                    if (f.key) headersObj[f.key] = f.value;
+                });
+                const newHeaders = Object.keys(headersObj).length > 0 ? JSON.stringify(headersObj, null, 2) : '';
+                if (this.monitorForm.headers !== newHeaders) {
+                    this.monitorForm.headers = newHeaders;
+                }
+                this._syncingHeaders = false;
+            }, { deep: true });
+
+            // Watch for method change to pre-fill POST template for new monitors
+            this.$watch('monitorForm.method', (newMethod) => {
+                if (!this.isEditing && newMethod === 'POST') {
+                    // Only fill if they are currently empty or just have default values
+                    const isHeadersEmpty = !this.monitorForm.headers || this.monitorForm.headers === '' || this.monitorForm.headers === '{}';
+                    const isBodyEmpty = !this.monitorForm.body || this.monitorForm.body === '';
+
+                    if (isHeadersEmpty && isBodyEmpty) {
+                        this.monitorForm.headers = JSON.stringify({
+                            "Content-Type": "application/json",
+                            "Authorization": "Bearer YOUR_API_KEY"
+                        }, null, 2);
+                        this.monitorForm.body = JSON.stringify({
+                            "model": "deepseek-v3.2",
+                            "messages": [
+                                { "role": "user", "content": "Only return ok" }
+                            ]
+                        }, null, 2);
+                    }
+                }
             });
         },
 
@@ -563,12 +700,15 @@ function app() {
                 interval: 60,
                 method: 'GET',
                 timeout: 10,
-                expected_status: 0,
+                expected_status: 200,
                 follow_redirects: true,
                 headers: '',
                 body: '',
+                bodyType: 'application/json',
                 response_regex: '',
-                formFields: []
+                formFields: [],
+                headerFields: [],
+                queryFields: []
             };
         },
 
@@ -583,6 +723,10 @@ function app() {
                     this.isEditing = true;
                     this.showAdvanced = false;
                     this.dashboardView = 'form';
+
+                    const formFields = this.parseFormFields(data.form_data);
+                    const bodyType = formFields.length > 0 ? 'multipart/form-data' : 'application/json';
+
                     this.monitorForm = {
                         id: data.id,
                         name: data.name,
@@ -591,12 +735,15 @@ function app() {
                         interval: data.interval,
                         method: data.method || 'GET',
                         timeout: data.timeout || 10,
-                        expected_status: data.expected_status || 0,
+                        expected_status: data.expected_status !== undefined && data.expected_status !== 0 ? data.expected_status : 200,
                         follow_redirects: data.follow_redirects !== undefined ? data.follow_redirects : true,
                         headers: data.headers || '',
                         body: data.body || '',
+                        bodyType: bodyType,
                         response_regex: data.response_regex || '',
-                        formFields: this.parseFormFields(data.form_data)
+                        formFields: formFields,
+                        headerFields: this.parseHeaderFields(data.headers),
+                        queryFields: []
                     };
                     this.socket.off('monitor', onMonitorData); // Clean up listener
                 }
@@ -613,6 +760,10 @@ function app() {
                     this.isEditing = false;
                     this.showAdvanced = false;
                     this.dashboardView = 'form';
+
+                    const formFields = this.parseFormFields(data.form_data);
+                    const bodyType = formFields.length > 0 ? 'multipart/form-data' : 'application/json';
+
                     this.monitorForm = {
                         name: data.name + ' (Copy)',
                         url: data.url,
@@ -620,12 +771,15 @@ function app() {
                         interval: data.interval,
                         method: data.method || 'GET',
                         timeout: data.timeout || 10,
-                        expected_status: data.expected_status || 0,
+                        expected_status: data.expected_status !== undefined && data.expected_status !== 0 ? data.expected_status : 200,
                         follow_redirects: data.follow_redirects !== undefined ? data.follow_redirects : true,
                         headers: data.headers || '',
                         body: data.body || '',
+                        bodyType: bodyType,
                         response_regex: data.response_regex || '',
-                        formFields: this.parseFormFields(data.form_data)
+                        formFields: formFields,
+                        headerFields: this.parseHeaderFields(data.headers),
+                        queryFields: []
                     };
                     this.socket.off('monitor', onMonitorData);
                 }
@@ -687,9 +841,38 @@ function app() {
 
         saveMonitor() {
             // Convert formFields to JSON string for backend
-            const monitorData = { ...this.monitorForm };
-            monitorData.form_data = JSON.stringify(this.monitorForm.formFields);
+            const monitorData = JSON.parse(JSON.stringify(this.monitorForm));
+
+            // Merge queryFields into URL
+            if (this.monitorForm.queryFields.length > 0) {
+                try {
+                    const urlStr = monitorData.url.includes('://') ? monitorData.url : 'http://' + monitorData.url;
+                    const url = new URL(urlStr);
+                    this.monitorForm.queryFields.forEach(f => {
+                        if (f.key) url.searchParams.append(f.key, f.value);
+                    });
+                    let finalUrl = url.toString();
+                    if (!monitorData.url.includes('://')) {
+                        finalUrl = finalUrl.replace(/^http:\/\//, '');
+                    }
+                    monitorData.url = finalUrl;
+                } catch (e) {
+                    console.error('URL merge error:', e);
+                }
+            }
+
+            // Clean up body data based on selected type
+            if (this.monitorForm.bodyType === 'application/json') {
+                monitorData.form_data = '[]';
+            } else {
+                monitorData.form_data = JSON.stringify(this.monitorForm.formFields);
+                monitorData.body = '';
+            }
+
             delete monitorData.formFields;
+            delete monitorData.headerFields;
+            delete monitorData.queryFields;
+            delete monitorData.bodyType;
 
             const event = this.isEditing ? 'edit' : 'add';
             this.socket.emit(event, monitorData, (res) => {
@@ -711,9 +894,38 @@ function app() {
         testMonitor() {
             this.isTesting = true;
             // Convert formFields to JSON string for backend
-            const monitorData = { ...this.monitorForm };
-            monitorData.form_data = JSON.stringify(this.monitorForm.formFields);
+            const monitorData = JSON.parse(JSON.stringify(this.monitorForm));
+
+            // Merge queryFields into URL
+            if (this.monitorForm.queryFields.length > 0) {
+                try {
+                    const urlStr = monitorData.url.includes('://') ? monitorData.url : 'http://' + monitorData.url;
+                    const url = new URL(urlStr);
+                    this.monitorForm.queryFields.forEach(f => {
+                        if (f.key) url.searchParams.append(f.key, f.value);
+                    });
+                    let finalUrl = url.toString();
+                    if (!monitorData.url.includes('://')) {
+                        finalUrl = finalUrl.replace(/^http:\/\//, '');
+                    }
+                    monitorData.url = finalUrl;
+                } catch (e) {
+                    console.error('URL merge error:', e);
+                }
+            }
+
+            // Clean up body data based on selected type
+            if (this.monitorForm.bodyType === 'application/json') {
+                monitorData.form_data = '[]';
+            } else {
+                monitorData.form_data = JSON.stringify(this.monitorForm.formFields);
+                monitorData.body = '';
+            }
+
             delete monitorData.formFields;
+            delete monitorData.headerFields;
+            delete monitorData.queryFields;
+            delete monitorData.bodyType;
 
             this.socket.emit('testMonitor', monitorData, (res) => {
                 this.isTesting = false;
@@ -774,8 +986,24 @@ function app() {
             this.monitorForm.formFields.push({ key: '', value: '', type: 'text' });
         },
 
+        addHeaderField() {
+            this.monitorForm.headerFields.push({ key: '', value: '' });
+        },
+
         removeFormField(index) {
             this.monitorForm.formFields.splice(index, 1);
+        },
+
+        removeHeaderField(index) {
+            this.monitorForm.headerFields.splice(index, 1);
+        },
+
+        addQueryField() {
+            this.monitorForm.queryFields.push({ key: '', value: '' });
+        },
+
+        removeQueryField(index) {
+            this.monitorForm.queryFields.splice(index, 1);
         },
 
         parseFormFields(formData) {
@@ -788,34 +1016,34 @@ function app() {
             }
         },
 
-        statusText(status, active = 1) {
-            if (active === 0) return '已暂停';
-            switch (status) {
-                case 1: return '正常';
-                case 0: return '中断';
-                case 2: return '检查中';
-                case 3: return '维护中';
-                default: return '未知';
+        parseHeaderFields(headers) {
+            if (!headers) return [];
+            try {
+                const parsed = JSON.parse(headers);
+                return Object.entries(parsed).map(([key, value]) => ({ key, value: String(value) }));
+            } catch (e) {
+                return [];
             }
+        },
+
+        statusText(status, active = 1) {
+            return statusText(status, active);
         },
 
         statusTextClass(status, active = 1) {
-            if (active === 0) return 'text-gray-500';
-            switch (status) {
-                case 1: return 'text-emerald-600';
-                case 0: return 'text-rose-600';
-                case 2: return 'text-amber-600';
-                case 3: return 'text-blue-600';
-                default: return 'text-slate-500';
-            }
+            return statusTextClass(status, active);
         },
 
         formatDuration(seconds) {
-            if (!seconds) return '0秒';
-            if (seconds < 60) return seconds + '秒';
-            const m = Math.floor(seconds / 60);
-            const s = seconds % 60;
-            return s > 0 ? `${m}分${s}秒` : `${m}分钟`;
+            return formatDuration(seconds);
+        },
+
+        formatDate(dateStr) {
+            return formatDate(dateStr);
+        },
+
+        formatTime(dateStr, includeDate = false, includeSeconds = false) {
+            return formatTime(dateStr, includeDate, includeSeconds);
         },
 
         initChart() {
@@ -976,7 +1204,8 @@ function app() {
 
             // ✅ 修复：使用 JSON 深度克隆彻底解除 Proxy，避免 toString() 循环
             const plainData = JSON.parse(JSON.stringify(this.chartAggregatedData.map(p => ({
-                time: p.time,
+                // Format RFC3339 time to local time for chart labels
+                time: this.formatTime(p.time, this.chartView === '7d'),
                 duration: p.duration || 0,
                 status: p.status,
                 isLive: p.isLive,

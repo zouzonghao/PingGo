@@ -433,7 +433,8 @@
                                             <span x-text="statusText(hb.status)"></span>
                                         </span>
                                     </td>
-                                    <td class="px-6 py-4 text-sm text-gray-500" x-text="hb.time"></td>
+                                    <td class="px-6 py-4 text-sm text-gray-500"
+                                        x-text="formatDate(hb.rawTime || hb.time)"></td>
                                     <td class="px-6 py-4 text-sm text-gray-700">
                                         <div class="flex items-center gap-2 group cursor-pointer"
                                             @click="openMsgDetail(hb.msg)" title="点击查看详情">
@@ -466,15 +467,13 @@
                         <!-- Basic Setup -->
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
                             <div class="space-y-2">
-                                <label
-                                    class="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">显示名称</label>
+                                <label class="text-sm font-bold text-gray-700 tracking-widest pl-1">显示名称</label>
                                 <input x-model="monitorForm.name"
                                     class="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition"
                                     type="text" required placeholder="如：我的博客">
                             </div>
                             <div class="space-y-2">
-                                <label
-                                    class="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">监控类型</label>
+                                <label class="text-sm font-bold text-gray-700 tracking-widest pl-1">监控类型</label>
                                 <select x-model="monitorForm.type"
                                     class="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition">
                                     <option value="http">HTTP(s)</option>
@@ -486,23 +485,62 @@
                         </div>
 
                         <div class="space-y-2">
-                            <label class="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">URL /
+                            <label class="text-sm font-bold text-gray-700 tracking-widest pl-1">URL /
                                 主机名</label>
                             <input x-model="monitorForm.url"
                                 class="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition"
                                 type="text" required placeholder="https://example.com">
+
+                            <div x-show="monitorForm.type === 'http'" class="mt-4 space-y-2">
+                                <div class="flex items-center justify-between">
+                                    <label class="text-sm font-bold text-gray-700 tracking-widest pl-1">参数
+                                        (Params)</label>
+                                    <button @click="addQueryField()" type="button"
+                                        class="text-xs font-bold text-primary hover:underline flex items-center gap-1">
+                                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                d="M12 4v16m8-8H4"></path>
+                                        </svg>
+                                        增加参数
+                                    </button>
+                                </div>
+                                <div class="space-y-3">
+                                    <template x-for="(field, index) in monitorForm.queryFields" :key="index">
+                                        <div class="flex items-center gap-3">
+                                            <input x-model="field.key" placeholder="Key (如：debug)"
+                                                class="flex-1 bg-gray-50 border border-gray-200 rounded-xl py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
+                                            <input x-model="field.value" placeholder="Value"
+                                                class="flex-[2] bg-gray-50 border border-gray-200 rounded-xl py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
+                                            <button @click="removeQueryField(index)" type="button"
+                                                class="text-gray-300 hover:text-danger p-1">
+                                                <svg class="w-4 h-4" fill="none" stroke="currentColor"
+                                                    viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                                        stroke-width="2"
+                                                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-4v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16">
+                                                    </path>
+                                                </svg>
+                                            </button>
+                                        </div>
+                                    </template>
+                                    <div x-show="monitorForm.queryFields.length === 0"
+                                        class="text-center py-2 text-[10px] text-gray-500 border border-dashed border-gray-100 rounded-xl bg-gray-50/30 mt-0">
+                                        无额外参数（保存时将自动合并到 URL）
+                                    </div>
+                                </div>
+                            </div>
                         </div>
 
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
                             <div class="space-y-2">
-                                <label class="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">检查间隔
+                                <label class="text-sm font-bold text-gray-700 tracking-widest pl-1">检查间隔
                                     (秒)</label>
                                 <input x-model.number="monitorForm.interval"
                                     class="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition"
                                     type="number" min="20">
                             </div>
                             <div class="space-y-2">
-                                <label class="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">超时时间
+                                <label class="text-sm font-bold text-gray-700 tracking-widest pl-1">超时时间
                                     (秒)</label>
                                 <input x-model.number="monitorForm.timeout"
                                     class="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition"
@@ -510,25 +548,11 @@
                             </div>
                         </div>
 
-                        <!-- Advanced Toggle (Only show for HTTP type) -->
-                        <div x-show="monitorForm.type === 'http'" class="pt-4 border-t border-gray-100">
-                            <button @click="showAdvanced = !showAdvanced" type="button"
-                                class="flex items-center gap-2 text-sm font-bold text-gray-500 hover:text-primary transition">
-                                <svg class="w-4 h-4 transition-transform" :class="showAdvanced ? 'rotate-180' : ''"
-                                    fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                        d="M19 9l-7 7-7-7"></path>
-                                </svg>
-                                高级设置
-                            </button>
-                        </div>
-
                         <!-- Advanced Fields (Only for HTTP type) -->
-                        <div x-show="showAdvanced && monitorForm.type === 'http'" x-collapse x-cloak
-                            class="space-y-8 pt-4">
+                        <div x-show="monitorForm.type === 'http'" class="space-y-8">
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
                                 <div class="space-y-2">
-                                    <label class="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">HTTP
+                                    <label class="text-sm font-bold text-gray-700 tracking-widest pl-1">HTTP
                                         方法</label>
                                     <select x-model="monitorForm.method"
                                         class="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition">
@@ -542,106 +566,131 @@
                                     </select>
                                 </div>
                                 <div class="space-y-2">
-                                    <label
-                                        class="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">预期状态码</label>
+                                    <label class="text-sm font-bold text-gray-700 tracking-widest pl-1">预期状态码</label>
                                     <input x-model.number="monitorForm.expected_status"
                                         class="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition"
                                         type="number" placeholder="0 (默认 2xx)">
                                 </div>
                             </div>
 
-                            <div class="space-y-2">
-                                <label class="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">请求头
-                                    (Headers JSON)</label>
-                                <textarea x-model="monitorForm.headers" rows="3"
-                                    class="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition font-mono text-sm"
-                                    placeholder='{"Authorization": "Bearer ...", "X-Custom": "value"}'></textarea>
+                            <div class="space-y-4">
+                                <div class="flex items-center justify-between">
+                                    <label class="text-sm font-bold text-gray-700 tracking-widest pl-1">请求头
+                                        (Headers)</label>
+                                    <button @click="addHeaderField()" type="button"
+                                        class="text-xs font-bold text-primary hover:underline flex items-center gap-1">
+                                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                d="M12 4v16m8-8H4"></path>
+                                        </svg>
+                                        添加请求头
+                                    </button>
+                                </div>
+
+                                <div class="space-y-3">
+                                    <template x-for="(field, index) in monitorForm.headerFields" :key="index">
+                                        <div class="flex items-center gap-3">
+                                            <input x-model="field.key" placeholder="Key (如：Authorization)"
+                                                class="flex-1 bg-gray-50 border border-gray-200 rounded-xl py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
+                                            <input x-model="field.value" placeholder="Value"
+                                                class="flex-[2] bg-gray-50 border border-gray-200 rounded-xl py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
+                                            <button @click="removeHeaderField(index)" type="button"
+                                                class="text-gray-300 hover:text-danger p-1">
+                                                <svg class="w-4 h-4" fill="none" stroke="currentColor"
+                                                    viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                                        stroke-width="2"
+                                                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-4v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16">
+                                                    </path>
+                                                </svg>
+                                            </button>
+                                        </div>
+                                    </template>
+                                    <div x-show="monitorForm.headerFields.length === 0"
+                                        class="text-center py-2 text-[10px] text-gray-500 border border-dashed border-gray-100 rounded-xl bg-gray-50/30 mt-0">
+                                        无自定义请求头
+                                    </div>
+                                </div>
+
+                                <div class="space-y-2">
+                                    <label class="text-xs font-bold text-gray-600 tracking-widest pl-1">JSON
+                                        视图 (自动同步)</label>
+                                    <textarea x-model="monitorForm.headers" rows="4"
+                                        class="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition font-mono text-sm"
+                                        placeholder='{"Authorization": "Bearer ...", "X-Custom": "value"}'></textarea>
+                                </div>
                             </div>
 
                             <!-- Body field: Only show for methods that support body (not GET, HEAD, OPTIONS) -->
-                            <!-- Body field: Only show for methods that support body (not GET, HEAD, OPTIONS) -->
                             <div x-show="!['GET', 'HEAD', 'OPTIONS'].includes(monitorForm.method)" class="space-y-6">
-                                <template x-if="!['POST', 'PUT', 'PATCH'].includes(monitorForm.method)">
-                                    <div class="space-y-2">
-                                        <label
-                                            class="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">请求体
-                                            (Body)</label>
-                                        <textarea x-model="monitorForm.body" rows="3"
+                                <div class="space-y-4">
+                                    <div class="flex items-center justify-between">
+                                        <div class="flex items-center gap-3">
+                                            <label class="text-sm font-bold text-gray-700 tracking-widest pl-1">请求体
+                                                (Body)</label>
+                                            <select x-model="monitorForm.bodyType"
+                                                class="bg-gray-50 border border-gray-200 rounded-lg py-1 px-2 text-[11px] font-bold text-gray-500 focus:outline-none focus:ring-1 focus:ring-primary">
+                                                <option value="application/json">application/json</option>
+                                                <option value="multipart/form-data">multipart/form-data</option>
+                                            </select>
+                                        </div>
+                                        <button x-show="monitorForm.bodyType === 'multipart/form-data'"
+                                            @click="addFormField()" type="button"
+                                            class="text-xs font-bold text-primary hover:underline flex items-center gap-1">
+                                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                    d="M12 4v16m8-8H4"></path>
+                                            </svg>
+                                            增加字段
+                                        </button>
+                                    </div>
+
+                                    <!-- Raw Body (application/json) -->
+                                    <div x-show="monitorForm.bodyType === 'application/json'" class="space-y-2">
+                                        <textarea x-model="monitorForm.body" rows="7"
                                             class="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition font-mono text-sm"
                                             placeholder='{"key": "value"}'></textarea>
-                                        <p class="text-[10px] text-gray-400 mt-1">仅适用于 DELETE 等带 Body 的请求</p>
+                                        <p class="text-[10px] text-gray-400 mt-1">请输入有效的 JSON 格式请求体</p>
                                     </div>
-                                </template>
 
-                                <!-- POST/PUT/PATCH Request: Toggle between Raw Body and Form Data -->
-                                <template x-if="['POST', 'PUT', 'PATCH'].includes(monitorForm.method)">
-                                    <div class="space-y-6">
-                                        <!-- Form Data (multipart/form-data) -->
-                                        <div class="space-y-4">
-                                            <div class="flex items-center justify-between">
-                                                <label
-                                                    class="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">表单数据
-                                                    (Form Data / -F)</label>
-                                                <button @click="addFormField()" type="button"
-                                                    class="text-xs font-bold text-primary hover:underline flex items-center gap-1">
-                                                    <svg class="w-3 h-3" fill="none" stroke="currentColor"
+                                    <!-- Form Data (multipart/form-data) -->
+                                    <div x-show="monitorForm.bodyType === 'multipart/form-data'" class="space-y-3">
+                                        <template x-for="(field, index) in monitorForm.formFields" :key="index">
+                                            <div class="flex items-center gap-3">
+                                                <input x-model="field.key" placeholder="Key (如：file)"
+                                                    class="flex-1 bg-gray-50 border border-gray-200 rounded-xl py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
+                                                <input x-model="field.value"
+                                                    :placeholder="field.type === 'file' ? '相对路径文件名 (如：data.txt)' : 'Value'"
+                                                    class="flex-[2] bg-gray-50 border border-gray-200 rounded-xl py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
+                                                <select x-model="field.type"
+                                                    class="bg-gray-50 border border-gray-200 rounded-xl py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary w-24">
+                                                    <option value="text">Text</option>
+                                                    <option value="file">File</option>
+                                                </select>
+                                                <button @click="removeFormField(index)" type="button"
+                                                    class="text-gray-300 hover:text-danger p-1">
+                                                    <svg class="w-4 h-4" fill="none" stroke="currentColor"
                                                         viewBox="0 0 24 24">
                                                         <path stroke-linecap="round" stroke-linejoin="round"
-                                                            stroke-width="2" d="M12 4v16m8-8H4"></path>
+                                                            stroke-width="2"
+                                                            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-4v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16">
+                                                        </path>
                                                     </svg>
-                                                    增加字段
                                                 </button>
                                             </div>
-
-                                            <div class="space-y-3">
-                                                <template x-for="(field, index) in monitorForm.formFields" :key="index">
-                                                    <div class="flex items-center gap-3">
-                                                        <input x-model="field.key" placeholder="Key (如：file)"
-                                                            class="flex-1 bg-gray-50 border border-gray-200 rounded-xl py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
-                                                        <input x-model="field.value"
-                                                            :placeholder="field.type === 'file' ? '相对路径文件名 (如：data.txt)' : 'Value'"
-                                                            class="flex-[2] bg-gray-50 border border-gray-200 rounded-xl py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
-                                                        <select x-model="field.type"
-                                                            class="bg-gray-50 border border-gray-200 rounded-xl py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary w-24">
-                                                            <option value="text">Text</option>
-                                                            <option value="file">File</option>
-                                                        </select>
-                                                        <button @click="removeFormField(index)" type="button"
-                                                            class="text-gray-300 hover:text-danger p-1">
-                                                            <svg class="w-4 h-4" fill="none" stroke="currentColor"
-                                                                viewBox="0 0 24 24">
-                                                                <path stroke-linecap="round" stroke-linejoin="round"
-                                                                    stroke-width="2"
-                                                                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-4v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16">
-                                                                </path>
-                                                            </svg>
-                                                        </button>
-                                                    </div>
-                                                </template>
-                                                <div x-show="monitorForm.formFields.length === 0"
-                                                    class="text-[10px] text-gray-400 p-4 border border-dashed border-gray-200 rounded-xl text-center bg-gray-50/50">
-                                                    未添加表单数据。如果为空且下方 Body 有内容，将使用 Raw Body 发送。
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        <!-- Raw Body (as fallback) -->
-                                        <div class="space-y-2" x-show="monitorForm.formFields.length === 0">
-                                            <label
-                                                class="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">原始请求体
-                                                (Raw Body / -d)</label>
-                                            <textarea x-model="monitorForm.body" rows="3"
-                                                class="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition font-mono text-sm"
-                                                placeholder='{"key": "value"}'></textarea>
+                                        </template>
+                                        <div x-show="monitorForm.formFields.length === 0"
+                                            class="text-center py-2 text-[10px] text-gray-500 border border-dashed border-gray-100 rounded-xl bg-gray-50/30 mt-0">
+                                            未添加表单数据
                                         </div>
                                     </div>
-                                </template>
+                                </div>
                             </div>
 
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
                                 <!-- Response Regex: Only show for methods that have response body (not HEAD) -->
                                 <div x-show="monitorForm.method !== 'HEAD'" class="space-y-2">
-                                    <label class="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">响应正则验证
+                                    <label class="text-sm font-bold text-gray-700 tracking-widest pl-1">响应正则验证
                                         (支持 JSON)</label>
                                     <input x-model="monitorForm.response_regex"
                                         class="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition"
@@ -657,7 +706,7 @@
                         </div>
 
                         <!-- Buttons -->
-                        <div class="flex justify-end gap-4 pt-6 border-t border-gray-100">
+                        <div class="flex justify-end gap-4 pt-6">
                             <button @click="dashboardView = 'details'" type="button"
                                 class="px-8 py-3 rounded-xl text-gray-500 font-bold hover:bg-gray-50 transition">取消</button>
                             <button @click="testMonitor" type="button" :disabled="isTesting"
@@ -995,16 +1044,14 @@
                 <template x-if="page === 'login'">
                     <form @submit.prevent="doLogin" class="space-y-6" autocomplete="off">
                         <div class="space-y-2">
-                            <label
-                                class="block text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">用户名</label>
+                            <label class="block text-sm font-bold text-gray-700 tracking-widest pl-1">用户名</label>
                             <input x-model="loginForm.username"
                                 class="w-full bg-gray-50 border border-transparent rounded-2xl py-4 px-5 text-gray-900 focus:bg-white focus:border-primary/20 transition-all outline-none"
                                 type="text" required placeholder="admin" autocomplete="off"
                                 name="username_login_pinggo">
                         </div>
                         <div class="space-y-2">
-                            <label
-                                class="block text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">密码</label>
+                            <label class="block text-sm font-bold text-gray-700 tracking-widest pl-1">密码</label>
                             <input x-model="loginForm.password"
                                 class="w-full bg-gray-50 border border-transparent rounded-2xl py-4 px-5 text-gray-900 focus:bg-white focus:border-primary/20 transition-all outline-none"
                                 type="password" required placeholder="••••••••" autocomplete="new-password"
@@ -1022,24 +1069,21 @@
                 <template x-if="page === 'setup'">
                     <form @submit.prevent="doSetup" class="space-y-5" autocomplete="off">
                         <div class="space-y-2">
-                            <label
-                                class="block text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">用户名</label>
+                            <label class="block text-sm font-bold text-gray-700 tracking-widest pl-1">用户名</label>
                             <input x-model="setupForm.username"
                                 class="w-full bg-gray-50 border border-transparent rounded-2xl py-4 px-5 text-gray-900 focus:bg-white focus:border-primary/20 transition-all outline-none"
                                 type="text" required placeholder="admin" autocomplete="off"
                                 name="username_setup_pinggo">
                         </div>
                         <div class="space-y-2">
-                            <label
-                                class="block text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">密码</label>
+                            <label class="block text-sm font-bold text-gray-700 tracking-widest pl-1">密码</label>
                             <input x-model="setupForm.password"
                                 class="w-full bg-gray-50 border border-transparent rounded-2xl py-4 px-5 text-gray-900 focus:bg-white focus:border-primary/20 transition-all outline-none"
                                 type="password" required placeholder="••••••••" autocomplete="new-password"
                                 name="password_setup_pinggo">
                         </div>
                         <div class="space-y-2">
-                            <label
-                                class="block text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">确认密码</label>
+                            <label class="block text-sm font-bold text-gray-700 tracking-widest pl-1">确认密码</label>
                             <input x-model="setupForm.confirmPassword"
                                 class="w-full bg-gray-50 border border-transparent rounded-2xl py-4 px-5 text-gray-900 focus:bg-white focus:border-primary/20 transition-all outline-none"
                                 type="password" required placeholder="••••••••" autocomplete="new-password"
@@ -1084,14 +1128,14 @@
 
                 <!-- Common Fields -->
                 <div class="space-y-2">
-                    <label class="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">规则名称</label>
+                    <label class="text-sm font-bold text-gray-700 tracking-widest pl-1">规则名称</label>
                     <input x-model="notifForm.name"
                         class="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition"
                         type="text" :placeholder="notifForm.type === 'trigger' ? '例如：全站宕机报警' : '例如：每日早安日报'">
                 </div>
 
                 <div class="space-y-2">
-                    <label class="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">接收邮箱</label>
+                    <label class="text-sm font-bold text-gray-700 tracking-widest pl-1">接收邮箱</label>
                     <input x-model="notifForm.email"
                         class="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition"
                         type="email" required placeholder="yourname@example.com">
@@ -1102,7 +1146,7 @@
                 <template x-if="notifForm.type === 'trigger'">
                     <div class="space-y-6">
                         <div class="space-y-2">
-                            <label class="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">监控对象</label>
+                            <label class="text-sm font-bold text-gray-700 tracking-widest pl-1">监控对象</label>
                             <select x-model="notifForm.monitorName"
                                 class="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition">
                                 <option value="*">所有监控项 (*)</option>
@@ -1112,7 +1156,7 @@
                             </select>
                         </div>
                         <div class="space-y-2">
-                            <label class="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">触发条件</label>
+                            <label class="text-sm font-bold text-gray-700 tracking-widest pl-1">触发条件</label>
                             <div class="grid grid-cols-3 gap-3">
                                 <label class="cursor-pointer">
                                     <input type="radio" x-model="notifForm.onStatus" value="down" class="peer sr-only">
@@ -1144,7 +1188,7 @@
                 <!-- Schedule Specific Fields -->
                 <template x-if="notifForm.type === 'schedule'">
                     <div class="space-y-2">
-                        <label class="text-xs font-bold text-gray-400 uppercase tracking-widest pl-1">发送时间 (每天)</label>
+                        <label class="text-sm font-bold text-gray-700 tracking-widest pl-1">发送时间 (每天)</label>
                         <input x-model="notifForm.time"
                             class="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition"
                             type="time">
@@ -1285,7 +1329,7 @@
         </div>
     </div>
 
-    <script src="app.js"></script>
+    <script src="app.js?v=20260130-1748"></script>
 </body>
 
 </html>

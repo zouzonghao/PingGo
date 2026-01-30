@@ -39,17 +39,40 @@ type MonitorConfig struct {
 
 var GlobalConfig Config
 
+// defaultConfigContent 默认配置文件内容
+const defaultConfigContent = `
+server:
+  port: 37374
+notification:
+  resend_api_key: "YOUR_RESEND_API_KEY"
+  email: "YOUR_EMAIL@example.com"
+
+# 数据保留配置 - 分层存储策略
+# 原始数据保留较短时间，聚合数据保留较长时间，大幅节省存储空间
+retention:
+  raw_hours: 24      # 原始心跳数据保留 24 小时
+  hourly_days: 7     # 小时级聚合数据保留 7 天
+  daily_days: 365    # 日级聚合数据保留 1 年
+`
+
 func LoadConfig(path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		// If file doesn't exist, we might still be okay if env vars are set
-		if !os.IsNotExist(err) {
+		if os.IsNotExist(err) {
+			// 配置文件不存在，生成默认配置文件
+			if writeErr := os.WriteFile(path, []byte(defaultConfigContent), 0644); writeErr != nil {
+				return fmt.Errorf("failed to create default config file: %w", writeErr)
+			}
+			// 使用默认配置内容
+			data = []byte(defaultConfigContent)
+			fmt.Printf("Configuration file not found. Created default config at: %s\n", path)
+		} else {
 			return err
 		}
-	} else {
-		if err := yaml.Unmarshal(data, &GlobalConfig); err != nil {
-			return err
-		}
+	}
+
+	if err := yaml.Unmarshal(data, &GlobalConfig); err != nil {
+		return err
 	}
 
 	// Environment variable overrides

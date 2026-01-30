@@ -7,6 +7,7 @@ import (
 	"ping-go/model"
 	"ping-go/monitor"
 	"strings"
+	"time"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -61,7 +62,7 @@ func NewServer(monitorService *monitor.Service, staticFS http.FileSystem) *Serve
 			"monitorID": h.MonitorID,
 			"status":    h.Status,
 			"msg":       h.Message,
-			"time":      h.Time.Format("2006-01-02 15:04:05"),
+			"time":      h.Time.Format(time.RFC3339),
 			"duration":  h.Duration,
 		}
 		s.socketServer.To("public").Emit("heartbeat", heartbeat)

@@ -50,7 +50,7 @@ func getRawHeartbeats(monitorID uint, hours int) []map[string]any {
 			"monitorID": h.MonitorID,
 			"status":    h.Status,
 			"msg":       h.Message,
-			"time":      h.Time.Format("2006-01-02 15:04:05"),
+			"time":      h.Time.Format(time.RFC3339),
 			"duration":  h.Duration,
 			"type":      "raw",
 		}
@@ -77,7 +77,7 @@ func getHourlyHeartbeats(monitorID uint, hours int) []map[string]any {
 		results[i] = map[string]any{
 			"monitorID":   h.MonitorID,
 			"status":      status,
-			"time":        h.Hour.Format("2006-01-02 15:04:05"),
+			"time":        h.Hour.Format(time.RFC3339),
 			"duration":    h.AvgDuration,
 			"uptime":      float64(h.Uptime) / 100.0, // 转换为百分比显示
 			"upCount":     h.UpCount,
@@ -114,7 +114,7 @@ func getDailyHeartbeats(monitorID uint, hours int) []map[string]any {
 		results[i] = map[string]any{
 			"monitorID":   h.MonitorID,
 			"status":      status,
-			"time":        h.Date.Format("2006-01-02"),
+			"time":        h.Date.Format(time.RFC3339),
 			"duration":    h.AvgDuration,
 			"uptime":      float64(h.Uptime) / 100.0, // 转换为百分比显示
 			"upCount":     h.UpCount,
@@ -309,7 +309,7 @@ func getChartData24h(monitorID uint, now time.Time, currentHour time.Time) []Cha
 				status = model.StatusDown
 			}
 			points[i] = ChartDataPoint{
-				Time:     hourTime.Format("15:04"),
+				Time:     hourTime.Format(time.RFC3339),
 				Duration: data.AvgDuration,
 				Status:   int(status),
 				Uptime:   float64(data.Uptime) / 100.0, // 转换为百分比
@@ -318,7 +318,7 @@ func getChartData24h(monitorID uint, now time.Time, currentHour time.Time) []Cha
 		} else {
 			// 无数据，填充空点
 			points[i] = ChartDataPoint{
-				Time:     hourTime.Format("15:04"),
+				Time:     hourTime.Format(time.RFC3339),
 				Duration: 0,
 				Status:   -1, // 表示无数据
 				Uptime:   100,
@@ -388,7 +388,7 @@ func getChartData7d(monitorID uint, now time.Time, currentHour time.Time) []Char
 			}
 
 			points[i] = ChartDataPoint{
-				Time:     slotStartTime.Format("01/02 15:04"),
+				Time:     slotStartTime.Format(time.RFC3339),
 				Duration: avgDuration,
 				Status:   int(status),
 				Uptime:   uptime, // 已经是百分比
@@ -397,7 +397,7 @@ func getChartData7d(monitorID uint, now time.Time, currentHour time.Time) []Char
 		} else {
 			// 无数据
 			points[i] = ChartDataPoint{
-				Time:     slotStartTime.Format("01/02 15:04"),
+				Time:     slotStartTime.Format(time.RFC3339),
 				Duration: 0,
 				Status:   -1,
 				Uptime:   100,
@@ -424,7 +424,7 @@ func getCurrentHourPoint(monitorID uint, currentHour time.Time, now time.Time) C
 	if len(heartbeats) == 0 {
 		// 没有数据，返回空点
 		return ChartDataPoint{
-			Time:     now.Format("15:04"),
+			Time:     now.Format(time.RFC3339),
 			Duration: 0,
 			Status:   -1,
 			Uptime:   100,
@@ -461,7 +461,7 @@ func getCurrentHourPoint(monitorID uint, currentHour time.Time, now time.Time) C
 	}
 
 	return ChartDataPoint{
-		Time:     now.Format("15:04"),
+		Time:     now.Format(time.RFC3339),
 		Duration: avgDuration,
 		Status:   int(status),
 		Uptime:   uptime,
@@ -529,7 +529,7 @@ func getCurrentSlotPoint(monitorID uint, currentHour time.Time, now time.Time, s
 
 	if dataCount == 0 {
 		return ChartDataPoint{
-			Time:     now.Format("01/02 15:04"),
+			Time:     now.Format(time.RFC3339),
 			Duration: 0,
 			Status:   -1,
 			Uptime:   100,
@@ -554,7 +554,7 @@ func getCurrentSlotPoint(monitorID uint, currentHour time.Time, now time.Time, s
 	}
 
 	return ChartDataPoint{
-		Time:     now.Format("01/02 15:04"),
+		Time:     now.Format(time.RFC3339),
 		Duration: avgDuration,
 		Status:   int(status),
 		Uptime:   uptime,

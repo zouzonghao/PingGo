@@ -3,6 +3,7 @@ package server
 import (
 	"ping-go/db"
 	"ping-go/model"
+	"time"
 
 	"github.com/zishang520/socket.io/socket"
 )
@@ -29,7 +30,7 @@ func (s *Server) setupHeartbeatHandlers(client *socket.Socket) {
 				"monitorID": h.MonitorID,
 				"status":    h.Status,
 				"msg":       h.Message,
-				"time":      h.Time.Format("2006-01-02 15:04:05"),
+				"time":      h.Time.Format(time.RFC3339),
 				"duration":  h.Duration,
 			})
 		}
