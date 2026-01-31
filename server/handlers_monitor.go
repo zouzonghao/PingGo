@@ -46,6 +46,7 @@ func (s *Server) setupMonitorHandlers(client *socket.Socket) {
 			data["headers"] = m.Headers
 			data["timeout"] = m.Timeout
 			data["expected_status"] = m.ExpectedStatus
+
 			data["response_regex"] = m.ResponseRegex
 			data["form_data"] = m.FormData
 			data["follow_redirects"] = m.FollowRedirects
@@ -220,8 +221,8 @@ func (s *Server) setupTestMonitorHandler(client *socket.Socket) {
 			msg = "Unknown monitor type"
 		}
 
-		if len(msg) > 1000 {
-			msg = msg[:1000] + "..."
+		if len(msg) > 50000 {
+			msg = msg[:50000] + "..."
 		}
 		if len(args) > 1 {
 			ack := args[1].(func([]any, error))

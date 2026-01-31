@@ -101,6 +101,7 @@ function app() {
             interval: 60,
             method: 'GET',
             timeout: 10,
+
             expected_status: 200,
             follow_redirects: true,
             headers: '',
@@ -140,7 +141,10 @@ function app() {
             onStatus: 'down',
             email: '',
             time: '09:00',
-            days: []
+            days: [],
+            timezone: '',
+            max_retries: 0,
+            max_retries_recovery: 0
         },
         showNotifModal: false,
 
@@ -522,6 +526,8 @@ function app() {
                 monitorName: '*',
                 onStatus: 'down',
                 email: '',
+                max_retries: 3,
+                max_retries_recovery: 3,
                 time: '',
                 days: []
             };
@@ -537,6 +543,8 @@ function app() {
                 monitorName: '',
                 onStatus: '',
                 email: '',
+                max_retries: 3,
+                max_retries_recovery: 3,
                 time: '09:00',
                 days: []
             };
@@ -554,8 +562,11 @@ function app() {
                 monitorName: cfg.monitor_name || '*',
                 onStatus: cfg.on_status || 'down',
                 email: cfg.email || '',
+                max_retries: cfg.max_retries || 0,
+                max_retries_recovery: cfg.max_retries_recovery || 0,
                 time: cfg.time || '09:00',
-                days: cfg.days || []
+                days: cfg.days || [],
+                timezone: cfg.timezone || ''
             };
             this.showNotifModal = true;
         },
@@ -581,7 +592,10 @@ function app() {
                 email: this.notifForm.email,
                 monitor_name: isTrigger ? (this.notifForm.monitorName || '*') : '',
                 on_status: isTrigger ? (this.notifForm.onStatus || 'down') : '',
-                time: isTrigger ? '' : (this.notifForm.time || '09:00')
+                max_retries: isTrigger ? (parseInt(this.notifForm.max_retries) || 0) : 0,
+                max_retries_recovery: isTrigger ? (parseInt(this.notifForm.max_retries_recovery) || 0) : 0,
+                time: isTrigger ? '' : (this.notifForm.time || '09:00'),
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
             };
 
             const event = this.isEditingNotif ? 'editNotification' : 'addNotification';
@@ -700,6 +714,8 @@ function app() {
                 interval: 60,
                 method: 'GET',
                 timeout: 10,
+                max_retries: 0,
+                max_retries_recovery: 0,
                 expected_status: 200,
                 follow_redirects: true,
                 headers: '',
@@ -735,6 +751,7 @@ function app() {
                         interval: data.interval,
                         method: data.method || 'GET',
                         timeout: data.timeout || 10,
+
                         expected_status: data.expected_status !== undefined && data.expected_status !== 0 ? data.expected_status : 200,
                         follow_redirects: data.follow_redirects !== undefined ? data.follow_redirects : true,
                         headers: data.headers || '',
@@ -771,6 +788,7 @@ function app() {
                         interval: data.interval,
                         method: data.method || 'GET',
                         timeout: data.timeout || 10,
+
                         expected_status: data.expected_status !== undefined && data.expected_status !== 0 ? data.expected_status : 200,
                         follow_redirects: data.follow_redirects !== undefined ? data.follow_redirects : true,
                         headers: data.headers || '',
@@ -977,7 +995,6 @@ function app() {
                 case 1: return 'bg-emerald-500'; // UP
                 case 0: return 'bg-rose-500'; // DOWN
                 case 2: return 'bg-amber-500'; // PENDING
-                case 3: return 'bg-blue-500'; // MAINTENANCE
                 default: return 'bg-slate-400';
             }
         },

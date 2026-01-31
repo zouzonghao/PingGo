@@ -27,6 +27,7 @@ func (s *Server) setupHeartbeatHandlers(client *socket.Socket) {
 		results := make([]map[string]any, 0)
 		for _, h := range heartbeats {
 			results = append(results, map[string]any{
+				"id":        h.ID,
 				"monitorID": h.MonitorID,
 				"status":    h.Status,
 				"msg":       h.Message,

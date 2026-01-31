@@ -145,6 +145,7 @@ func (s *Server) setupEditMonitorHandler(client *socket.Socket) {
 		if active, ok := safeMapGetFloat64(data, "active"); ok {
 			m.Active = int(active)
 		}
+
 		if method := safeMapGetString(data, "method"); method != "" {
 			m.Method = method
 		} else {
@@ -184,9 +185,13 @@ func (s *Server) setupEditMonitorHandler(client *socket.Socket) {
 			} else {
 				s.monitorService.StartMonitor(&m)
 			}
+			// Reset notification states so rules re-arm from the fresh start
+			s.monitorService.ResetNotificationStateByMonitor(m.ID)
 		} else if m.Active == 1 {
 			s.monitorService.StopMonitor(m.ID)
 			s.monitorService.StartMonitor(&m)
+			// Also reset if it's currently running and modified
+			s.monitorService.ResetNotificationStateByMonitor(m.ID)
 		}
 
 		for _, arg := range args {
@@ -239,6 +244,8 @@ func (s *Server) setupToggleActiveHandler(client *socket.Socket) {
 			} else {
 				s.monitorService.StartMonitor(&m)
 			}
+			// Reset notification memory states for this monitor across all rules
+			s.monitorService.ResetNotificationStateByMonitor(m.ID)
 		}
 
 		for _, arg := range args {

@@ -16,10 +16,9 @@ const (
 )
 
 const (
-	StatusDown        = 0
-	StatusUp          = 1
-	StatusPending     = 2
-	StatusMaintenance = 3
+	StatusDown    = 0
+	StatusUp      = 1
+	StatusPending = 2
 )
 
 type Monitor struct {
@@ -45,7 +44,7 @@ type Monitor struct {
 	Active int `json:"active" gorm:"default:1"`
 	Weight int `json:"weight" gorm:"default:2000"`
 
-	Status    int       `json:"status"` // 0: DOWN, 1: UP, 2: PENDING, 3: MAINTENANCE
+	Status    int       `json:"status"` // 0: DOWN, 1: UP, 2: PENDING
 	LastCheck time.Time `json:"last_check"`
 	Message   string    `json:"msg"` // Frontend expects "msg" not "message" usually? checking.. Uptime Kuma uses "msg" in heartbeat, but "message" in monitor? Let's check heartbeat.
 }
@@ -78,7 +77,7 @@ type Notification struct {
 type Heartbeat struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
 	MonitorID uint      `gorm:"index:idx_monitor_time" json:"monitorID"`
-	Status    int       `json:"status"` // 0: DOWN, 1: UP, 2: PENDING, 3: MAINTENANCE
+	Status    int       `json:"status"` // 0: DOWN, 1: UP, 2: PENDING
 	Message   string    `json:"msg"`
 	Time      time.Time `gorm:"index:idx_monitor_time" json:"time"`
 	Duration  int       `json:"duration"` // response time in ms

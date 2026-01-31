@@ -30,41 +30,50 @@ const (
 	DefaultPingTimeout = 5 * time.Second
 )
 
-type NotificationJob struct {
+type CheckResult struct {
+	MonitorID uint
 	Name      string
-	OldStatus int
-	NewStatus int
+	URL       string
+	Status    int
 	Message   string
 }
 
+type NotificationState struct {
+	ConsecutiveFailures  int
+	ConsecutiveSuccesses int
+	LastSentStatus       int
+}
+
 type Service struct {
-	monitors            map[uint]*model.Monitor
-	tickers             map[uint]*time.Ticker
-	stopChans           map[uint]chan struct{}
-	mu                  sync.Mutex
-	OnHeartbeat         func(h *model.Heartbeat)
-	notificationChannel chan *NotificationJob
-	stopWorker          chan struct{}
-	workerStopped       bool
-	stoppedMonitors     map[uint]bool
+	monitors           map[uint]*model.Monitor
+	tickers            map[uint]*time.Ticker
+	stopChans          map[uint]chan struct{}
+	mu                 sync.Mutex
+	OnHeartbeat        func(h *model.Heartbeat)
+	checkResultChannel chan *CheckResult
+	stopWorker         chan struct{}
+	workerStopped      bool
+	stoppedMonitors    map[uint]bool
+	notificationStates map[string]*NotificationState
 }
 
 func NewService() *Service {
 	// Init logger if not already
 	logger.Init("info")
 
-	// Reset all notifications to inactive on startup
-	if err := db.DB.Model(&model.Notification{}).Where("1=1").Update("active", false).Error; err != nil {
-		logger.Error("Failed to reset notification active status", zap.Error(err))
+	// Reset trigger notifications to inactive on startup as requested
+	if err := db.DB.Model(&model.Notification{}).Where("type = ?", "trigger").Update("active", false).Error; err != nil {
+		logger.Error("Failed to reset trigger notifications", zap.Error(err))
 	}
 
 	s := &Service{
-		monitors:            make(map[uint]*model.Monitor),
-		tickers:             make(map[uint]*time.Ticker),
-		stopChans:           make(map[uint]chan struct{}),
-		notificationChannel: make(chan *NotificationJob, 100),
-		stopWorker:          make(chan struct{}),
-		stoppedMonitors:     make(map[uint]bool),
+		monitors:           make(map[uint]*model.Monitor),
+		tickers:            make(map[uint]*time.Ticker),
+		stopChans:          make(map[uint]chan struct{}),
+		checkResultChannel: make(chan *CheckResult, 1000),
+		stopWorker:         make(chan struct{}),
+		stoppedMonitors:    make(map[uint]bool),
+		notificationStates: make(map[string]*NotificationState),
 	}
 
 	go s.runNotificationWorker()
@@ -108,92 +117,196 @@ func (s *Service) HealthCheck() map[string]any {
 }
 
 func (s *Service) runNotificationWorker() {
+	logger.Info("Notification worker started")
 	for {
 		select {
-		case job := <-s.notificationChannel:
+		case result := <-s.checkResultChannel:
 			// 1. Check DB Trigger Rules
 			var rules []model.Notification
 			if err := db.DB.Where("type = ? AND active = ?", "trigger", true).Find(&rules).Error; err == nil && len(rules) > 0 {
 				for _, rule := range rules {
 					var cfg struct {
-						MonitorName string `json:"monitor_name"`
-						OnStatus    string `json:"on_status"` // "down", "up", "change"
-						Email       string `json:"email"`
+						MonitorName        string `json:"monitor_name"`
+						OnStatus           string `json:"on_status"` // "down", "up", "change"
+						Email              string `json:"email"`
+						MaxRetries         int    `json:"max_retries"`
+						MaxRetriesRecovery int    `json:"max_retries_recovery"`
 					}
 					if err := json.Unmarshal([]byte(rule.Config), &cfg); err != nil {
+						logger.Error("Failed to unmarshal trigger config", zap.Error(err))
 						continue
 					}
 
 					// Check Monitor Name Match ("*" means all)
-					if cfg.MonitorName != "*" && cfg.MonitorName != job.Name {
+					if cfg.MonitorName != "*" && cfg.MonitorName != result.Name {
 						continue
 					}
 
-					// Check Status Condition
-					shouldSend := false
-					if cfg.OnStatus == "change" {
-						shouldSend = true
-					} else if cfg.OnStatus == "down" && job.NewStatus == model.StatusDown {
-						shouldSend = true
-					} else if cfg.OnStatus == "up" && job.NewStatus == model.StatusUp {
-						shouldSend = true
+					// State Management Key
+					stateKey := fmt.Sprintf("%d_%d", rule.ID, result.MonitorID)
+
+					s.mu.Lock()
+					state, exists := s.notificationStates[stateKey]
+					if !exists {
+						state = &NotificationState{
+							LastSentStatus: result.Status, // Initialize with current status to arm immediately
+						}
+						s.notificationStates[stateKey] = state
+						s.mu.Unlock()
+						// First time sync, no notification needed yet
+						continue
 					}
 
-					if shouldSend && cfg.Email != "" {
-						to := []string{cfg.Email}
-						subject := fmt.Sprintf("PingGo Notification: %s is %s", job.Name, statusToString(job.NewStatus))
-						content := fmt.Sprintf("Monitor <b>%s</b> changed status from <b>%s</b> to <b>%s</b>.<br>Message: %s<br>Time: %s",
-							job.Name, statusToString(job.OldStatus), statusToString(job.NewStatus), job.Message, time.Now().Format("2006-01-02 15:04:05"))
+					// Update Counters
+					// Only count Success/Failure for definitive statuses.
+					// Pending (and others) should not reset/increment counters.
+					if result.Status == model.StatusDown {
+						state.ConsecutiveFailures++
+						state.ConsecutiveSuccesses = 0
+					} else if result.Status == model.StatusUp {
+						state.ConsecutiveSuccesses++
+						state.ConsecutiveFailures = 0
+					}
 
-						go func(recipients []string, subj, body string) {
-							if err := notification.SendEmail(recipients, subj, body); err != nil {
-								logger.Error("Failed to send trigger email", zap.Strings("recipients", recipients), zap.Error(err))
-							}
-						}(to, subject, content)
+					// Determine Effective Status (Hard Status)
+					shouldNotify := false
+					newStatusToSend := state.LastSentStatus
+
+					// Define thresholds (0 treated as 1 for immediate)
+					thresholdDown := cfg.MaxRetries
+					if thresholdDown <= 0 {
+						thresholdDown = 1
+					}
+					thresholdUp := cfg.MaxRetriesRecovery
+					if thresholdUp <= 0 {
+						thresholdUp = 1
+					}
+
+					if result.Status == model.StatusDown {
+						if state.ConsecutiveFailures >= thresholdDown {
+							newStatusToSend = model.StatusDown
+						}
+					} else if result.Status == model.StatusUp {
+						if state.ConsecutiveSuccesses >= thresholdUp {
+							newStatusToSend = model.StatusUp
+						}
+					} else {
+						// Maintenance / Pending usually immediate? or treat as UP for now?
+						// STRICT LOGIC: Do not change Hard Status during Pending
+						// newStatusToSend = result.Status (Removed to keep previous hard status)
+					}
+
+					if newStatusToSend != state.LastSentStatus {
+						// Status Changed!
+						shouldNotify = false
+						if cfg.OnStatus == "change" {
+							shouldNotify = true
+						} else if cfg.OnStatus == "down" && newStatusToSend == model.StatusDown {
+							shouldNotify = true
+						} else if cfg.OnStatus == "up" && newStatusToSend == model.StatusUp {
+							shouldNotify = true
+						}
+
+						// Update State
+						state.LastSentStatus = newStatusToSend
+
+						// Release lock before sending notification (although send is async, let's minimize lock time)
+						s.mu.Unlock()
+
+						if shouldNotify {
+							// Send Notification
+							s.sendTriggerNotification(cfg.Email, result.Name, result.URL, state.LastSentStatus, newStatusToSend, result.Message)
+						}
+					} else {
+						s.mu.Unlock()
 					}
 				}
+			} else if err != nil {
+				logger.Error("Failed to fetch trigger rules", zap.Error(err))
 			}
 
-			// 2. Global Config Fallback (Legacy) - REMOVED
-			// We only send notifications if the user has explicitly configured a Trigger rule.
-			// This prevents "surprise" emails when the user hasn't set up any alerts.
-			/*
-				toEmail := config.GlobalConfig.Notification.Email
-				if toEmail == "" {
-					toEmail = os.Getenv("NOTIFICATION_EMAIL")
-				}
-
-				if toEmail != "" {
-					// Legacy behavior removed to fix bug where users receive emails without setting triggers.
-				}
-			*/
-
 		case <-s.stopWorker:
+			logger.Info("Notification worker stopped")
 			return
 		}
 	}
 }
 
+func (s *Service) sendTriggerNotification(email, name, url string, oldStatus, newStatus int, msg string) {
+	if email == "" {
+		return
+	}
+	to := []string{email}
+	subject := fmt.Sprintf("PingGo Notification: %s is %s", name, statusToString(newStatus))
+	// Determine style
+	color := "#e74c3c" // Red for error
+	statusText := "服务宕机通知"
+	if newStatus == model.StatusUp {
+		color = "#2ecc71" // Green for recovery
+		statusText = "服务恢复通知"
+	}
+
+	data := notification.StatusChangeData{
+		Name:       name,
+		URL:        url,
+		OldStatus:  statusToString(oldStatus),
+		NewStatus:  statusToString(newStatus),
+		Message:    msg,
+		Color:      color,
+		StatusText: statusText,
+		DateTime:   time.Now().Format("2006-01-02 15:04:05"),
+	}
+
+	content, err := notification.RenderStatusChangeEmail(data)
+	if err != nil {
+		logger.Error("Failed to render status change email", zap.Error(err))
+		return
+	}
+
+	logger.Info("Sending trigger email", zap.Strings("to", to), zap.String("subject", subject))
+	go func(recipients []string, subj, body string) {
+		if err := notification.SendEmail(recipients, subj, body); err != nil {
+			logger.Error("Failed to send trigger email", zap.Strings("recipients", recipients), zap.Error(err))
+		} else {
+			logger.Info("Trigger email sent successfully", zap.Strings("recipients", recipients))
+		}
+	}(to, subject, content)
+}
+
 func (s *Service) runScheduledWorker() {
+	logger.Info("Scheduled worker started")
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
-			nowStr := time.Now().Format("15:04")
 			var rules []model.Notification
 			if err := db.DB.Where("type = ? AND active = ?", "schedule", true).Find(&rules).Error; err == nil {
 				for _, rule := range rules {
 					var cfg struct {
-						Time  string `json:"time"`
-						Email string `json:"email"`
+						Time     string `json:"time"`
+						Email    string `json:"email"`
+						Timezone string `json:"timezone"`
 					}
 					if err := json.Unmarshal([]byte(rule.Config), &cfg); err != nil {
 						continue
 					}
 
+					// Handle Timezone
+					now := time.Now()
+					if cfg.Timezone != "" {
+						loc, err := time.LoadLocation(cfg.Timezone)
+						if err == nil {
+							now = now.In(loc)
+						} else {
+							logger.Error("Failed to load location", zap.String("timezone", cfg.Timezone), zap.Error(err))
+						}
+					}
+					nowStr := now.Format("15:04")
+
 					if cfg.Time == nowStr {
+						logger.Info("Triggering scheduled report", zap.String("email", cfg.Email), zap.String("time", nowStr), zap.String("timezone", cfg.Timezone))
 						// Send Report
 						if cfg.Email != "" {
 							go s.sendReport(cfg.Email)
@@ -202,6 +315,7 @@ func (s *Service) runScheduledWorker() {
 				}
 			}
 		case <-s.stopWorker:
+			logger.Info("Scheduled worker stopped")
 			return
 		}
 	}
@@ -246,9 +360,6 @@ func (s *Service) sendReport(email string) {
 		case model.StatusPending:
 			statusStr = "检测中"
 			color = "#f1c40f" // yellow
-		case model.StatusMaintenance:
-			statusStr = "维护"
-			color = "#3498db" // blue
 		}
 
 		// Calculate 24h stats
@@ -276,60 +387,13 @@ func (s *Service) sendReport(email string) {
 	dateStr := time.Now().Format("2006-01-02")
 	subject := fmt.Sprintf("PingGo 日报 - %s", dateStr)
 
-	// Build HTML Content
-	html := fmt.Sprintf(`
-	<!DOCTYPE html>
-	<html>
-	<head>
-		<meta charset="utf-8">
-		<meta name="viewport" content="width=device-width, initial-scale=1.0">
-	</head>
-	<body style="margin: 0; padding: 0; background-color: #f6f9fc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
-		<div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-top: 20px; margin-bottom: 20px;">
-			<!-- Header -->
-			<div style="background-color: #2ecc71; padding: 30px 40px; text-align: center;">
-				<h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 700; letter-spacing: 0.5px;">PingGo 每日速报</h1>
-				<p style="margin: 10px 0 0; color: rgba(255,255,255,0.9); font-size: 14px;">%s</p>
-			</div>
+	downColor := "#94a3b8"
+	if down > 0 {
+		downColor = "#e74c3c"
+	}
 
-			<!-- Summary Cards -->
-			<div style="padding: 30px 40px; background-color: #f8f9fa; border-bottom: 1px solid #edf2f7;">
-				<div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; text-align: center;">
-					<div style="background: white; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0;">
-						<div style="font-size: 12px; color: #64748b; text-transform: uppercase; font-weight: 600;">监控总数</div>
-						<div style="font-size: 24px; font-weight: 800; color: #1e293b; margin-top: 5px;">%d</div>
-					</div>
-					<div style="background: white; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0;">
-						<div style="font-size: 12px; color: #64748b; text-transform: uppercase; font-weight: 600;">系统在线率</div>
-						<div style="font-size: 24px; font-weight: 800; color: #2ecc71; margin-top: 5px;">%.1f%%</div>
-					</div>
-					<div style="background: white; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0;">
-						<div style="font-size: 12px; color: #64748b; text-transform: uppercase; font-weight: 600;">异常服务</div>
-						<div style="font-size: 24px; font-weight: 800; color: %s; margin-top: 5px;">%d</div>
-					</div>
-				</div>
-			</div>
-
-			<!-- Detail List -->
-			<div style="padding: 30px 40px;">
-				<h3 style="margin: 0 0 20px; color: #334155; font-size: 16px; font-weight: 700;">监控详情</h3>
-				<table style="width: 100%%; border-collapse: collapse;">
-					<thead style="background-color: #f8f9fa; color: #64748b; font-size: 12px; text-transform: uppercase; text-align: left;">
-						<tr>
-							<th style="padding: 12px 15px; border-radius: 6px 0 0 6px;">服务名称</th>
-							<th style="padding: 12px 15px; text-align: center;">24h 在线率</th>
-							<th style="padding: 12px 15px; text-align: center;">平均延迟</th>
-							<th style="padding: 12px 15px; text-align: right; border-radius: 0 6px 6px 0;">状态</th>
-						</tr>
-					</thead>
-					<tbody style="font-size: 14px; color: #334155;">
-	`, dateStr, activeCount, uptimePercent, func() string {
-		if down > 0 {
-			return "#e74c3c"
-		}
-		return "#94a3b8"
-	}(), down)
-
+	// Prepare monitor list for template
+	var reportMonitors []notification.MonitorInfo
 	for index, m := range monitorList {
 		rowBg := "#ffffff"
 		if index%2 == 1 {
@@ -344,42 +408,32 @@ func (s *Service) sendReport(email string) {
 			uptimeColor = "#f1c40f"
 		}
 
-		html += fmt.Sprintf(`
-						<tr style="background-color: %s;">
-							<td style="padding: 12px 15px; border-bottom: 1px solid #f1f5f9;">
-								<div style="font-weight: 600;">%s</div>
-								<div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">%s</div>
-							</td>
-							<td style="padding: 12px 15px; border-bottom: 1px solid #f1f5f9; text-align: center; font-family: monospace; font-weight: 600; color: %s;">
-								%.1f%%
-							</td>
-							<td style="padding: 12px 15px; border-bottom: 1px solid #f1f5f9; text-align: center; font-family: monospace;">
-								%d ms
-							</td>
-							<td style="padding: 12px 15px; text-align: right; border-bottom: 1px solid #f1f5f9;">
-								<span style="display: inline-block; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; background-color: %s15; color: %s;">
-									%s
-								</span>
-							</td>
-						</tr>
-		`, rowBg, m.Name, strings.ToUpper(m.Type), uptimeColor, m.Uptime24h, m.AvgResponse24h, m.Color, m.Color, m.Status)
+		reportMonitors = append(reportMonitors, notification.MonitorInfo{
+			Name:           m.Name,
+			Type:           strings.ToUpper(m.Type),
+			Uptime24h:      m.Uptime24h,
+			AvgResponse24h: m.AvgResponse24h,
+			Status:         m.Status,
+			Color:          m.Color,
+			UptimeColor:    uptimeColor,
+			RowBg:          rowBg,
+		})
 	}
 
-	html += `
-					</tbody>
-				</table>
-			</div>
+	data := notification.DailyReportData{
+		Date:          dateStr,
+		TotalCount:    activeCount,
+		UptimePercent: uptimePercent,
+		DownCount:     down,
+		DownColor:     downColor,
+		Monitors:      reportMonitors,
+	}
 
-			<!-- Footer -->
-			<div style="padding: 20px 40px; background-color: #f1f5f9; text-align: center; border-bottom-left-radius: 12px; border-bottom-right-radius: 12px;">
-				<p style="margin: 0; color: #94a3b8; font-size: 12px;">
-					PingGo Monitor System &bull; <a href="#" style="color: #94a3b8; text-decoration: none;">Manage Notifications</a>
-				</p>
-			</div>
-		</div>
-	</body>
-	</html>
-	`
+	html, err := notification.RenderDailyReportEmail(data)
+	if err != nil {
+		logger.Error("Failed to render daily report email", zap.Error(err))
+		return
+	}
 
 	if err := notification.SendEmail([]string{email}, subject, html); err != nil {
 		logger.Error("Failed to send report", zap.String("email", email), zap.Error(err))
@@ -472,7 +526,43 @@ func (s *Service) StopMonitor(id uint) {
 		delete(s.tickers, id)
 	}
 	delete(s.monitors, id)
+
+	// Clean up states for this monitor?
+	// The problem is keys are string "RuleID_MonitorID"
+	// We should probably iterate and delete.
+	for key := range s.notificationStates {
+		if strings.HasSuffix(key, fmt.Sprintf("_%d", id)) {
+			delete(s.notificationStates, key)
+		}
+	}
+
 	s.stoppedMonitors[id] = true
+}
+
+func (s *Service) ResetNotificationState(ruleID uint) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	prefix := fmt.Sprintf("%d_", ruleID)
+	for key := range s.notificationStates {
+		if strings.HasPrefix(key, prefix) {
+			delete(s.notificationStates, key)
+		}
+	}
+	logger.Info("Reset notification memory state for rule", zap.Uint("ruleID", ruleID))
+}
+
+func (s *Service) ResetNotificationStateByMonitor(monitorID uint) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	suffix := fmt.Sprintf("_%d", monitorID)
+	for key := range s.notificationStates {
+		if strings.HasSuffix(key, suffix) {
+			delete(s.notificationStates, key)
+		}
+	}
+	logger.Info("Reset notification memory state for monitor", zap.Uint("monitorID", monitorID))
 }
 
 func (s *Service) StopAll() {
@@ -493,10 +583,13 @@ func (s *Service) StopAll() {
 		t.Stop()
 		delete(s.tickers, id)
 	}
+
+	// Reset all states
+	s.notificationStates = make(map[string]*NotificationState)
 }
 
 func (s *Service) Check(id uint) {
-	// Retrieve fresh copy or use cached? Better get fresh to ensure no race on updating status
+	// Retrieve fresh copy
 	var m model.Monitor
 	if err := db.DB.First(&m, id).Error; err != nil {
 		return
@@ -538,40 +631,15 @@ func (s *Service) Check(id uint) {
 		}
 	}
 
-	if m.Status != model.StatusPending && m.Status != status {
-		logger.Info("Monitor status changed",
-			zap.String("name", m.Name),
-			zap.Int("old_status", m.Status),
-			zap.Int("new_status", status),
-		)
-
-		// Copy for callback
-		mCopy := m
-		mCopy.Status = status
-		mCopy.Message = msg
-		mCopy.LastCheck = time.Now()
-
-		// Send Email via Worker Pool
-		select {
-		case s.notificationChannel <- &NotificationJob{
-			Name:      m.Name,
-			OldStatus: m.Status,
-			NewStatus: status,
-			Message:   msg,
-		}:
-		default:
-			logger.Warn("Notification channel full, dropping alert")
-		}
-	}
-
-	// Update DB
+	// Always update DB with raw status
 	m.Status = status
 	m.Message = msg
 	m.LastCheck = time.Now()
 
-	db.DB.Save(&m)
+	// Only update status fields to avoid overwriting Active state if changed concurrently
+	db.DB.Model(&m).Select("Status", "Message", "LastCheck").Updates(&m)
 
-	// Save Heartbeat asynchronously via buffer
+	// Save Heartbeat
 	heartbeat := model.Heartbeat{
 		MonitorID: m.ID,
 		Status:    status,
@@ -581,14 +649,26 @@ func (s *Service) Check(id uint) {
 	}
 	db.AddHeartbeat(&heartbeat)
 
-	// Notify via callback (Socket.IO) - Every check
+	// Notify via callback (Socket.IO)
 	if s.OnHeartbeat != nil {
 		s.OnHeartbeat(&heartbeat)
 	}
 
+	// Send to Notification Worker
+	select {
+	case s.checkResultChannel <- &CheckResult{
+		MonitorID: m.ID,
+		Name:      m.Name,
+		URL:       m.URL,
+		Status:    status,
+		Message:   msg,
+	}:
+	default:
+		logger.Warn("Check result channel full, dropping result")
+	}
+
 	logger.Info("Check finished",
 		zap.String("name", m.Name),
-		zap.String("type", string(m.Type)),
 		zap.Int("status", status),
 		zap.String("msg", msg),
 	)
@@ -602,8 +682,6 @@ func statusToString(status int) string {
 		return "DOWN"
 	case model.StatusPending:
 		return "PENDING"
-	case model.StatusMaintenance:
-		return "MAINTENANCE"
 	default:
 		return "UNKNOWN"
 	}
@@ -839,7 +917,7 @@ func CheckHTTP(m model.Monitor) (int, string) {
 
 	// Helper function for body truncation
 	truncateBody := func(b string) string {
-		maxLen := 300
+		maxLen := 10000
 		if len(b) > maxLen {
 			return b[:maxLen] + "...(truncated)"
 		}
@@ -1110,8 +1188,8 @@ func TestHTTP(m model.Monitor) (int, string) {
 	}
 	defer resp.Body.Close()
 
-	// Read body (limit to 10KB for test preview)
-	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 10240))
+	// Read body (limit to 50KB for test preview)
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 51200))
 	if err != nil {
 		return resp.StatusCode, fmt.Sprintf("Read body failed: %v", err)
 	}

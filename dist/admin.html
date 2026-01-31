@@ -425,7 +425,7 @@
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-gray-50">
-                            <template x-for="hb in heartbeats" :key="hb.time">
+                            <template x-for="hb in heartbeats" :key="hb.id || hb.time">
                                 <tr class="hover:bg-gray-50 transition-colors">
                                     <td class="px-6 py-4">
                                         <span class="px-2 py-1 rounded-full text-[10px] font-bold"
@@ -531,21 +531,20 @@
                             </div>
                         </div>
 
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                        <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
                             <div class="space-y-2">
-                                <label class="text-sm font-bold text-gray-700 tracking-widest pl-1">检查间隔
-                                    (秒)</label>
+                                <label class="text-sm font-bold text-gray-700 tracking-widest pl-1">检查间隔 (秒)</label>
                                 <input x-model.number="monitorForm.interval"
                                     class="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition"
                                     type="number" min="20">
                             </div>
                             <div class="space-y-2">
-                                <label class="text-sm font-bold text-gray-700 tracking-widest pl-1">超时时间
-                                    (秒)</label>
+                                <label class="text-sm font-bold text-gray-700 tracking-widest pl-1">超时时间 (秒)</label>
                                 <input x-model.number="monitorForm.timeout"
                                     class="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition"
                                     type="number" min="1">
                             </div>
+
                         </div>
 
                         <!-- Advanced Fields (Only for HTTP type) -->
@@ -785,7 +784,7 @@
                     <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                         <div>
                             <h2 class="text-3xl font-bold text-gray-900">通知设置</h2>
-                            <p class="text-gray-500 mt-1 text-sm">管理系统报警规则与定期报告</p>
+                            <p class="text-gray-500 mt-1 text-sm">管理系统报警规则与定期报告（注意程序重启后会关闭所有通知，请手动开启）</p>
                         </div>
                     </div>
 
@@ -822,11 +821,11 @@
                                 </button>
                             </div>
 
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div class="space-y-3">
                                 <template x-for="n in scheduledNotifications" :key="n.id">
                                     <div class="flex items-center justify-between p-4 rounded-2xl border transition-all duration-300 hover:shadow-md group"
                                         :class="n.active ? 'bg-white border-indigo-100 shadow-sm' : 'bg-gray-50 border-gray-100 opacity-70'">
-                                        <div class="flex items-center gap-4">
+                                        <div class="flex items-center gap-5 flex-1 min-w-0">
                                             <!-- Switch -->
                                             <button @click="toggleNotification(n)"
                                                 class="w-10 h-6 rounded-full relative transition-colors duration-200 focus:outline-none shrink-0"
@@ -835,9 +834,11 @@
                                                     :class="n.active ? 'left-5' : 'left-1'"></div>
                                             </button>
 
-                                            <div>
-                                                <div class="font-bold text-gray-700 text-sm" x-text="n.name"></div>
-                                                <div class="flex items-center gap-2 mt-1.5 h-5">
+                                            <div class="flex-1 grid grid-cols-1 sm:grid-cols-12 gap-4 items-center">
+                                                <div class="sm:col-span-4 font-bold text-gray-700 text-sm truncate"
+                                                    x-text="n.name"></div>
+
+                                                <div class="sm:col-span-5 flex items-center gap-2 text-xs">
                                                     <span
                                                         class="flex items-center gap-1 text-[10px] font-mono bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded border border-gray-200">
                                                         <svg class="w-3 h-3 text-gray-400" fill="none"
@@ -848,14 +849,15 @@
                                                         </svg>
                                                         <span x-text="n.cfg.time"></span>
                                                     </span>
-                                                    <span class="text-[10px] text-gray-400 truncate max-w-[150px]"
-                                                        x-text="n.cfg.email"></span>
                                                 </div>
+
+                                                <div class="sm:col-span-3 text-[10px] text-gray-400 sm:text-right truncate"
+                                                    x-text="n.cfg.email" :title="n.cfg.email"></div>
                                             </div>
                                         </div>
 
                                         <div
-                                            class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            class="flex items-center gap-1 ml-2 opacity-0 group-hover:opacity-100 transition-opacity">
                                             <button @click="openEditNotification(n)"
                                                 class="text-gray-300 hover:text-indigo-600 p-2 transition-colors">
                                                 <svg class="w-4 h-4" fill="none" stroke="currentColor"
@@ -1161,14 +1163,14 @@
                                 <label class="cursor-pointer">
                                     <input type="radio" x-model="notifForm.onStatus" value="down" class="peer sr-only">
                                     <div
-                                        class="py-2 text-center rounded-lg border border-gray-200 peer-checked:bg-rose-50 peer-checked:border-rose-200 peer-checked:text-rose-600 transition text-sm font-bold text-gray-500 hover:bg-gray-50">
+                                        class="py-3 text-center rounded-lg border border-gray-200 peer-checked:bg-rose-50 peer-checked:border-rose-200 peer-checked:text-rose-600 transition text-sm font-bold text-gray-500 hover:bg-gray-50">
                                         宕机 (Down)
                                     </div>
                                 </label>
                                 <label class="cursor-pointer">
                                     <input type="radio" x-model="notifForm.onStatus" value="up" class="peer sr-only">
                                     <div
-                                        class="py-2 text-center rounded-lg border border-gray-200 peer-checked:bg-emerald-50 peer-checked:border-emerald-200 peer-checked:text-emerald-600 transition text-sm font-bold text-gray-500 hover:bg-gray-50">
+                                        class="py-3 text-center rounded-lg border border-gray-200 peer-checked:bg-emerald-50 peer-checked:border-emerald-200 peer-checked:text-emerald-600 transition text-sm font-bold text-gray-500 hover:bg-gray-50">
                                         恢复 (Up)
                                     </div>
                                 </label>
@@ -1176,13 +1178,35 @@
                                     <input type="radio" x-model="notifForm.onStatus" value="change"
                                         class="peer sr-only">
                                     <div
-                                        class="py-2 text-center rounded-lg border border-gray-200 peer-checked:bg-blue-50 peer-checked:border-blue-200 peer-checked:text-blue-600 transition text-sm font-bold text-gray-500 hover:bg-gray-50">
+                                        class="py-3 text-center rounded-lg border border-gray-200 peer-checked:bg-blue-50 peer-checked:border-blue-200 peer-checked:text-blue-600 transition text-sm font-bold text-gray-500 hover:bg-gray-50">
                                         状态变更
                                     </div>
                                 </label>
                             </div>
+
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
+                                <div class="space-y-2">
+                                    <label class="text-sm font-bold text-gray-700 tracking-widest pl-1"
+                                        x-text="notifForm.onStatus === 'up' ? '报警重置期 (连续失败)' : '报警触发 (连续失败)'"></label>
+                                    <input x-model.number="notifForm.max_retries"
+                                        class="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition"
+                                        type="number" min="1" placeholder="3 (默认)">
+                                    <p class="text-[10px] text-gray-400 pl-1"
+                                        x-text="notifForm.onStatus === 'up' ? '连续失败多少次后，允许下一次恢复通知' : '连续失败多少次后触发报警 (1 = 立即)'">
+                                    </p>
+                                </div>
+                                <div class="space-y-2">
+                                    <label class="text-sm font-bold text-gray-700 tracking-widest pl-1"
+                                        x-text="notifForm.onStatus === 'down' ? '报警重置期 (连续成功)' : '报警触发 (连续成功)'"></label>
+                                    <input x-model.number="notifForm.max_retries_recovery"
+                                        class="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition"
+                                        type="number" min="1" placeholder="3 (默认)">
+                                    <p class="text-[10px] text-gray-400 pl-1"
+                                        x-text="notifForm.onStatus === 'down' ? '连续成功多少次后，允许下一次宕机通知' : '连续成功多少次后发送恢复通知 (1 = 立即)'">
+                                    </p>
+                                </div>
+                            </div>
                         </div>
-                    </div>
                 </template>
 
                 <!-- Schedule Specific Fields -->

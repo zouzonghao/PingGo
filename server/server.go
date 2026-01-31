@@ -59,6 +59,7 @@ func NewServer(monitorService *monitor.Service, staticFS http.FileSystem) *Serve
 	// 绑定监控心跳回调
 	s.monitorService.OnHeartbeat = func(h *model.Heartbeat) {
 		heartbeat := map[string]any{
+			"id":        h.ID,
 			"monitorID": h.MonitorID,
 			"status":    h.Status,
 			"msg":       h.Message,

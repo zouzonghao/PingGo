@@ -17,10 +17,12 @@ func SendEmail(to []string, subject, htmlContent string) error {
 		apiKey = os.Getenv("RESEND_API_KEY")
 	}
 
-	if apiKey == "" {
-		return fmt.Errorf("RESEND_API_KEY is not set")
+	if apiKey == "" || apiKey == "YOUR_RESEND_API_KEY" {
+		log.Printf("ERROR: RESEND_API_KEY is not set or is still default. Current value: %s", apiKey)
+		return fmt.Errorf("RESEND_API_KEY is not set correctly")
 	}
 
+	log.Printf("DEBUG: Preparing to send email via Resend. To: %v, Subject: %s", to, subject)
 	client := resend.NewClient(apiKey)
 
 	fromEmail := config.GlobalConfig.Notification.FromEmail
@@ -43,13 +45,14 @@ func SendEmail(to []string, subject, htmlContent string) error {
 	var err error
 	maxRetries := 3
 	for i := 0; i < maxRetries; i++ {
-		_, err = client.Emails.Send(params)
+		log.Printf("DEBUG: Sending email attempt %d/%d", i+1, maxRetries)
+		resp, err := client.Emails.Send(params)
 		if err == nil {
-			log.Printf("Email sent successfully to %v", to)
+			log.Printf("SUCCESS: Email sent successfully to %v. ID: %s", to, resp.Id)
 			return nil
 		}
 
-		log.Printf("Failed to send email (attempt %d/%d): %v", i+1, maxRetries, err)
+		log.Printf("ERROR: Failed to send email (attempt %d/%d): %v", i+1, maxRetries, err)
 		if i < maxRetries-1 {
 			time.Sleep(time.Duration(2*(i+1)) * time.Second)
 		}

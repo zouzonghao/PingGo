@@ -103,6 +103,9 @@ func (s *Server) setupNotificationHandlers(client *socket.Socket) {
 		n.Config = string(configBytes)
 		db.DB.Save(&n)
 
+		// Reset memory state so it re-arms immediately
+		s.monitorService.ResetNotificationState(n.ID)
+
 		if len(args) > 1 {
 			ack := args[1].(func([]any, error))
 			ack([]any{map[string]any{
@@ -159,6 +162,11 @@ func (s *Server) setupNotificationHandlers(client *socket.Socket) {
 
 		n.Active = !n.Active
 		db.DB.Save(&n)
+
+		// If turning ON, reset memory state so it re-arms immediately
+		if n.Active {
+			s.monitorService.ResetNotificationState(n.ID)
+		}
 
 		// Broadcast updated list
 		var notifications []model.Notification

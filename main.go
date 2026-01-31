@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"syscall"
 	"time"
+	_ "time/tzdata"
 )
 
 //go:embed dist/*
