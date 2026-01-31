@@ -30,6 +30,20 @@ jobs:
       - name: Download Go modules
         run: go mod download
 
+      # 更新前端资源版本号 (Cache Busting)
+      - name: Update frontend asset version
+        run: |
+          # 生成类似 20260130-1748 的时间戳
+          VERSION=$(date +'%Y%m%d-%H%M')
+          echo "Updating frontend version to: $VERSION"
+          
+          # 替换 dist/admin.html 中的 app.js?v=...
+          # 使用正则表达式匹配 src="app.js?v=..." 并替换为新的时间戳
+          sed -i "s/src=\"app.js?v=[^\"]*\"/src=\"app.js?v=$VERSION\"/g" dist/admin.html
+          
+          # 验证替换结果
+          grep "app.js?v=" dist/admin.html
+
       # 构建所有平台
       - name: Build for all platforms
         run: make release-all

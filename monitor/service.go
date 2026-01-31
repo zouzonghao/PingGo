@@ -609,6 +609,10 @@ func (s *Service) Check(id uint) {
 	case model.MonitorTypeHTTP:
 		status, msg = CheckHTTP(m)
 		duration = int(time.Since(startTime).Milliseconds())
+		// 如果是超时或网络连接类的硬故障，将时长设为 0，以便前端图表显示为虚线
+		if status == model.StatusDown && (msg == "Timeout" || msg == "Connection Refused" || msg == "DNS Resolution Failed" || msg == "TLS Error") {
+			duration = 0
+		}
 	case model.MonitorTypePing:
 		var rtt time.Duration
 		status, msg, rtt = CheckPing(m.URL, m.Timeout)
@@ -620,6 +624,10 @@ func (s *Service) Check(id uint) {
 	case model.MonitorTypeDNS:
 		status, msg = CheckDNS(m.URL, m.Timeout)
 		duration = int(time.Since(startTime).Milliseconds())
+		// DNS 失败通常视为硬故障
+		if status == model.StatusDown {
+			duration = 0
+		}
 	default:
 		// Default to HTTP if unknown or fallback
 		if m.Type == "" {

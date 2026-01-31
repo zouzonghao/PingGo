@@ -1088,13 +1088,20 @@ function app() {
 
             // ✅ 修复：使用 JSON 深度克隆彻底解除 Proxy，避免 toString() 循环
             // 创建完全独立的纯数据数组
-            const plainData = JSON.parse(JSON.stringify(this.heartbeats.map(h => ({
-                time: h.time,
-                duration: h.duration || 0
-            }))));
+            const plainData = JSON.parse(JSON.stringify(this.heartbeats.map(h => {
+                const isHard = h.status === 0 && (h.duration === 0 || !h.duration || h.msg === 'Timeout' || h.msg === 'Connection Refused' || h.msg === 'DNS Resolution Failed');
+                return {
+                    time: h.time,
+                    duration: isHard ? null : (h.duration || 0),
+                    status: h.status,
+                    isHardError: isHard
+                };
+            })));
 
             const labels = plainData.map(h => h.time).reverse();
             const data = plainData.map(h => h.duration).reverse();
+            const statuses = plainData.map(h => h.status).reverse();
+            const isHardErrors = plainData.map(h => h.isHardError).reverse();
 
             try {
                 // ✅ 关键修复：将 Chart 实例存储在 canvas DOM 元素上，避免 Alpine Proxy 包装
@@ -1111,8 +1118,61 @@ function app() {
                             fill: true,
                             tension: 0.4,
                             pointRadius: 0,
-                        }]
+                            spanGaps: true,
+                            segment: {
+                                borderColor: ctx => ctx.p0.skip || ctx.p1.skip ? '#cbd5e1' : undefined,
+                                borderDash: ctx => ctx.p0.skip || ctx.p1.skip ? [5, 5] : undefined,
+                            }
+                        }],
+                        _statuses: statuses,
+                        _isHardErrors: isHardErrors
                     },
+                    plugins: [{
+                        id: 'failBackground',
+                        beforeDraw: (chart) => {
+                            const { ctx, chartArea } = chart;
+                            const meta = chart.getDatasetMeta(0);
+                            if (!meta.data || meta.data.length === 0) return;
+                            const statuses = chart.data._statuses || [];
+                            const isHardErrors = chart.data._isHardErrors || [];
+                            const uptime = chart.data._uptime || [];
+                            // 判断是否是聚合视图（通过是否有 uptime 数据）
+                            const isAggregated = uptime.length > 0 && uptime.some(u => u !== undefined && u !== null);
+                            ctx.save();
+
+                            for (let i = 0; i < meta.data.length; i++) {
+                                let fillStyle = null;
+
+                                if (isAggregated) {
+                                    // 聚合视图：基于可用率 (uptime) 着色
+                                    // uptime 是 0-100 的数值
+                                    const u = uptime[i] !== undefined ? uptime[i] : 100;
+                                    if (u < 100) {
+                                        // 计算红色透明度：可用率越低，红色越深
+                                        // 0% -> 0.25 (最深)
+                                        // 90%-99% -> 0.05 (最浅)
+                                        // 步进为 0.02 (10个档位)
+                                        const opacity = 0.05 + (100 - u) / 100 * 0.20;
+                                        fillStyle = `rgba(231, 76, 60, ${opacity})`;
+                                    }
+                                } else {
+                                    // 最近视图：基于状态着色
+                                    if (statuses[i] === 0) {
+                                        fillStyle = isHardErrors[i] ? 'rgba(231, 76, 60, 0.15)' : 'rgba(241, 196, 15, 0.15)';
+                                    }
+                                }
+
+                                if (fillStyle) {
+                                    ctx.fillStyle = fillStyle;
+                                    const x = meta.data[i].x;
+                                    const left = i === 0 ? chartArea.left : (meta.data[i - 1].x + x) / 2;
+                                    const right = i === meta.data.length - 1 ? chartArea.right : (x + meta.data[i + 1].x) / 2;
+                                    ctx.fillRect(left, chartArea.top, right - left, chartArea.bottom - chartArea.top);
+                                }
+                            }
+                            ctx.restore();
+                        }
+                    }],
                     options: {
                         responsive: true,
                         maintainAspectRatio: false,
@@ -1157,18 +1217,26 @@ function app() {
             }
 
             try {
-                // ✅ 使用 JSON 深度克隆彻底解除 Proxy
-                const plainData = JSON.parse(JSON.stringify(this.heartbeats.map(h => ({
-                    time: h.time,
-                    duration: h.duration || 0
-                }))));
+                const plainData = JSON.parse(JSON.stringify(this.heartbeats.map(h => {
+                    const isHard = h.status === 0 && (h.duration === 0 || !h.duration || h.msg === 'Timeout' || h.msg === 'Connection Refused' || h.msg === 'DNS Resolution Failed');
+                    return {
+                        time: h.time,
+                        duration: isHard ? null : (h.duration || 0),
+                        status: h.status,
+                        isHardError: isHard
+                    };
+                })));
 
                 const labels = plainData.map(h => h.time).reverse();
                 const data = plainData.map(h => h.duration).reverse();
+                const statuses = plainData.map(h => h.status).reverse();
+                const isHardErrors = plainData.map(h => h.isHardError).reverse();
 
-                // ✅ 从 canvas 获取 Chart 实例，避免 Alpine Proxy
+                // ✅ 从 canvas 获取 Chart 实例，同步更新数据和状态
                 canvas._chartInstance.data.labels = labels;
                 canvas._chartInstance.data.datasets[0].data = data;
+                canvas._chartInstance.data._statuses = statuses;
+                canvas._chartInstance.data._isHardErrors = isHardErrors;
                 canvas._chartInstance.update('none');
             } catch (e) {
                 console.error('Error updating chart:', e);
@@ -1219,25 +1287,35 @@ function app() {
             }
 
 
-            // ✅ 修复：使用 JSON 深度克隆彻底解除 Proxy，避免 toString() 循环
-            const plainData = JSON.parse(JSON.stringify(this.chartAggregatedData.map(p => ({
-                // Format RFC3339 time to local time for chart labels
-                time: this.formatTime(p.time, this.chartView === '7d'),
-                duration: p.duration || 0,
-                status: p.status,
-                isLive: p.isLive,
-                uptime: p.uptime
-            }))));
+            const plainData = JSON.parse(JSON.stringify(this.chartAggregatedData.map(p => {
+                // 聚合数据由于没有原始 msg，主要通过 duration === 0 来判断（后端已同步改动）
+                const isHard = p.status === 0 && (p.duration === 0 || !p.duration);
+                return {
+                    // Format RFC3339 time to local time for chart labels
+                    time: this.formatTime(p.time, this.chartView === '7d'),
+                    duration: isHard ? null : (p.duration || 0),
+                    status: p.status,
+                    isLive: p.isLive,
+                    uptime: p.uptime,
+                    isHardError: isHard
+                };
+            })));
 
             const labels = plainData.map(p => p.time);
             const data = plainData.map(p => p.duration);
+            const statuses = plainData.map(p => p.status);
+            const isHardErrors = plainData.map(p => p.isHardError);
+            const uptimes = plainData.map(p => p.uptime);
 
             // ✅ 使用纯数据计算颜色
+            // ✅ 数据点颜色与背景逻辑一致：基于可用率 (uptime)
             const pointColors = plainData.map(p => {
-                if (p.status === 0) return '#e74c3c'; // 异常：红色
                 if (p.status === -1) return '#bdc3c7'; // 无数据：灰色
-                if (p.isLive) return '#3498db'; // 实时数据：蓝色
-                return '#2ecc71'; // 正常：绿色
+
+                // 基于可用率计算色相 (0-120: 红色 -> 黄色 -> 绿色)
+                const u = p.uptime !== undefined ? p.uptime : 100;
+                const hue = Math.max(0, Math.min(120, u * 1.2));
+                return `hsl(${hue}, 70%, 50%)`; // 使用 HSL 确保与背景渐变同步
             });
 
             // ✅ 使用纯数据用于 tooltip
@@ -1258,13 +1336,77 @@ function app() {
                             borderColor: '#2ecc71',
                             backgroundColor: 'rgba(46, 204, 113, 0.1)',
                             borderWidth: 2,
-                            fill: true,
+                            fill: false,
                             tension: 0.4,
                             pointRadius: 3,
                             pointBackgroundColor: pointColors,
                             pointBorderColor: pointColors,
-                        }]
+                            spanGaps: true,
+                            segment: {
+                                borderColor: ctx => ctx.p0.skip || ctx.p1.skip ? '#cbd5e1' : undefined,
+                                borderDash: ctx => ctx.p0.skip || ctx.p1.skip ? [5, 5] : undefined,
+                            }
+                        }],
+                        _statuses: statuses,
+                        _isHardErrors: isHardErrors,
+                        _uptime: uptimes
                     },
+                    plugins: [{
+                        id: 'failBackground',
+                        beforeDraw: (chart) => {
+                            const { ctx, chartArea } = chart;
+                            const meta = chart.getDatasetMeta(0);
+                            if (!meta.data || meta.data.length === 0) return;
+                            const statuses = chart.data._statuses || [];
+                            const isHardErrors = chart.data._isHardErrors || [];
+                            const uptime = chart.data._uptime || [];
+                            // 判断是否是聚合视图（通过是否有 uptime 数据）
+                            const isAggregated = uptime.length > 0 && uptime.some(u => u !== undefined && u !== null);
+                            ctx.save();
+
+                            for (let i = 0; i < meta.data.length; i++) {
+                                let fillStyle = null;
+
+                                if (isAggregated) {
+                                    // 聚合视图：基于可用率 (uptime) 着色
+                                    // uptime 是 0-100 的数值
+                                    const u = uptime[i] !== undefined ? uptime[i] : 100;
+                                    const d = chart.data.datasets[0].data[i];
+                                    const s = statuses[i];
+
+                                    // 优先处理无数据状态 (-1)，不填充颜色
+                                    if (s === -1) {
+                                        fillStyle = null;
+                                    }
+                                    // 用户需求：如果可用率为 100% 且延迟为 0 (通常表示无数据空洞)，则不填充颜色
+                                    else if (u >= 100 && (d === 0 || d === null)) {
+                                        fillStyle = null;
+                                    } else {
+                                        // 0% (Red) -> 50% (Yellow) -> 100% (Green)
+                                        // Hue: 0 -> 60 -> 120
+                                        const hue = Math.max(0, Math.min(120, u * 1.2));
+                                        // 透明度
+                                        const opacity = 0.15;
+                                        fillStyle = `hsla(${hue}, 80%, 60%, ${opacity})`;
+                                    }
+                                } else {
+                                    // 最近视图：基于状态着色
+                                    if (statuses[i] === 0) {
+                                        fillStyle = isHardErrors[i] ? 'rgba(231, 76, 60, 0.15)' : 'rgba(241, 196, 15, 0.15)';
+                                    }
+                                }
+
+                                if (fillStyle) {
+                                    ctx.fillStyle = fillStyle;
+                                    const x = meta.data[i].x;
+                                    const left = i === 0 ? chartArea.left : (meta.data[i - 1].x + x) / 2;
+                                    const right = i === meta.data.length - 1 ? chartArea.right : (x + meta.data[i + 1].x) / 2;
+                                    ctx.fillRect(left, chartArea.top, right - left, chartArea.bottom - chartArea.top);
+                                }
+                            }
+                            ctx.restore();
+                        }
+                    }],
                     options: {
                         responsive: true,
                         maintainAspectRatio: false,
@@ -1294,6 +1436,7 @@ function app() {
                         scales: {
                             x: {
                                 display: true,
+                                grid: { display: false },
                                 ticks: {
                                     font: { size: 9 },
                                     maxRotation: 45,
