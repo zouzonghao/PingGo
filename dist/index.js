@@ -7,6 +7,7 @@ function statusApp() {
         searchText: '',
         filterBy: 'None',
         sortBy: 'Name',
+        showPaused: false,
         now: Date.now(),
 
         init() {
@@ -114,6 +115,11 @@ function statusApp() {
 
         get filteredMonitors() {
             let result = [...this.monitors];
+
+            // Filter out paused if showPaused is false
+            if (!this.showPaused) {
+                result = result.filter(m => m.active !== 0);
+            }
 
             // Search
             if (this.searchText) {

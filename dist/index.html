@@ -90,8 +90,17 @@
                 <input type="text" x-model="searchText" placeholder="搜索端点..."
                     class="block w-full pl-10 pr-3 py-2 border border-inputBorder rounded-lg bg-white text-sm focus:outline-none focus:ring-1 focus:ring-title focus:border-title">
             </div>
-            <div class="flex items-center gap-6">
-                <div class="flex items-center gap-2">
+            <div class="flex flex-wrap items-center gap-x-6 gap-y-3">
+                <div class="flex items-center gap-2 shrink-0">
+                    <span class="text-sm text-subtitle">显示已暂停</span>
+                    <button @click="showPaused = !showPaused"
+                        class="w-11 h-6 rounded-full relative transition-colors duration-200 focus:outline-none shrink-0"
+                        :class="showPaused ? 'bg-healthy shadow-inner' : 'bg-gray-200'">
+                        <div class="w-4 h-4 bg-white rounded-full absolute top-1 transition-all duration-200 shadow-sm"
+                            :class="showPaused ? 'left-6' : 'left-1'"></div>
+                    </button>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
                     <span class="text-sm text-subtitle">筛选类型:</span>
                     <select x-model="filterBy"
                         class="h-8 pl-2 pr-8 text-sm bg-white border border-border rounded-md focus:outline-none focus:ring-1 focus:ring-title">
@@ -100,7 +109,7 @@
                         </template>
                     </select>
                 </div>
-                <div class="flex items-center gap-2">
+                <div class="flex items-center gap-2 shrink-0">
                     <span class="text-sm text-subtitle">排序方式:</span>
                     <select x-model="sortBy"
                         class="h-8 pl-2 pr-8 text-sm bg-white border border-border rounded-md focus:outline-none focus:ring-1 focus:ring-title">
