@@ -170,7 +170,10 @@ func (s *Server) serveStaticFileGin(c *gin.Context, filename string) {
 			}).Parse(string(content))
 
 			if err != nil {
-				c.String(http.StatusInternalServerError, "failed to parse template "+filename)
+				log.Printf("failed to parse template %s: %v", filename, err)
+				// 如果解析失败，尝试直接输出原始 HTML，避免页面彻底打不开
+				c.Header("Content-Type", "text/html; charset=utf-8")
+				c.Writer.Write(content)
 				return
 			}
 
