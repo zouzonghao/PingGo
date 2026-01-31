@@ -33,6 +33,8 @@ jobs:
       # 压缩前端资源 (Minify assets)
       - name: Minify frontend assets
         run: go run scripts/build_assets.go
+        env:
+          PRODUCTION_BUILD: true
 
       # 构建所有平台
       - name: Build for all platforms
