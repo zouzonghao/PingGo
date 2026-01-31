@@ -182,9 +182,21 @@ func (s *Server) serveStaticFileGin(c *gin.Context, filename string) {
 			return
 		}
 
-		// 对于非 HTML 文件，使用 hashfs 处理缓存
-		// 如果路径包含哈希，hashfs 会自动设置强缓存请求头
-		s.hfs.FileServer().ServeHTTP(c.Writer, c.Request)
+		// 对于非 HTML 文件，使用 hashfs 处理
+		// 如果请求的文件名包含哈希值，hashfs 会自动识别并打开原始文件
+		// 我们通过检查文件名是否与 HashName 匹配来判断是否应该设置强缓存
+		if filename != s.hfs.HashName(filename) {
+			// 如果 HashName(filename) 返回的结果包含哈希（即不是原始文件名），
+			// 说明这是一个合法的哈希请求路径（由模板 {{.Hash}} 生成）
+			// 注意：这里的逻辑稍微简化了，因为 filename 已经是被请求的文件名了
+		}
+		
+		// 实际上，hashfs 提供了一个简单的办法：如果文件名包含哈希，就设置强缓存
+		_, hash := hashfs.ParseName(filename)
+		if hash != "" {
+			c.Header("Cache-Control", "public, max-age=31536000, immutable")
+		}
+		http.FileServer(http.FS(s.hfs)).ServeHTTP(c.Writer, c.Request)
 	} else {
 		c.String(http.StatusOK, "Frontend not loaded")
 	}
@@ -204,7 +216,8 @@ func (s *Server) SetStatic(fs http.FileSystem) {
 			cleanPath = cleanPath[1:]
 		}
 
-		f, err := fs.Open(cleanPath)
+		// 使用 s.hfs.Open 而不是 fs.Open，因为 s.hfs 支持带哈希的文件名
+		f, err := s.hfs.Open(cleanPath)
 		if err == nil {
 			f.Close()
 			s.serveStaticFileGin(c, cleanPath)
