@@ -18,7 +18,11 @@ import (
 func main() {
 	m := minify.New()
 	m.AddFunc("text/css", css.Minify)
-	m.AddFunc("text/html", html.Minify)
+	m.Add("text/html", &html.Minifier{
+		KeepDocumentTags: true,
+		KeepEndTags:      true,
+		KeepQuotes:       true, // 保持引号，避免模板语法在某些属性中出错
+	})
 	m.AddFunc("image/svg+xml", svg.Minify)
 	m.AddFuncRegexp(regexp.MustCompile("^(application|text)/(x-)?(java|ecma)script$"), js.Minify)
 	m.AddFuncRegexp(regexp.MustCompile("[/+]json$"), json.Minify)
@@ -37,10 +41,10 @@ func main() {
 		switch ext {
 		case ".css":
 			mimetype = "text/css"
-		case ".html":
-			mimetype = "text/html"
 		case ".js":
 			mimetype = "text/javascript"
+		case ".html":
+			mimetype = "text/html"
 		case ".json":
 			mimetype = "application/json"
 		case ".svg":

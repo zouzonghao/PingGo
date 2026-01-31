@@ -5,8 +5,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PingGo 管理面板</title>
-    <link rel="icon" href="{{ .Hash "assets/favicon.avif" }}" type="image/avif">
-    <script src="{{ .Hash "assets/tailwind.min.js" }}"></script>
+    <link rel="icon" href="{{ .Static.HashName "assets/favicon.avif" }}" type="image/avif">
+    <script src="{{ .Static.HashName "assets/tailwind.min.js" }}"></script>
     <script>
         tailwind.config = {
             theme: {
@@ -25,10 +25,10 @@
             }
         }
     </script>
-    <script src="assets/socket.io.min.js"></script>
-    <script defer src="assets/alpine.min.js"></script>
-    <script src="assets/chart.min.js"></script>
-    <link rel="stylesheet" href="style.css">
+    <script src="{{ .Static.HashName "assets/socket.io.min.js" }}"></script>
+    <script defer src="{{ .Static.HashName "assets/alpine.min.js" }}"></script>
+    <script src="{{ .Static.HashName "assets/chart.min.js" }}"></script>
+    <link rel="stylesheet" href="{{ .Static.HashName "style.css" }}">
     <style type="text/tailwindcss">
         [x-cloak] { display: none !important; }
         body { 
@@ -1352,7 +1352,7 @@
         </div>
     </div>
 
-    <script src="{{ .Hash "app.js" }}"></script>
+    <script src="{{ .Static.HashName "app.js" }}"></script>
 </body>
 
 </html>

@@ -1,21 +1,20 @@
 package server
 
 import (
-	"fmt"
+	"io/fs"
 	"log"
 	"net/http"
 	"ping-go/db"
 	"ping-go/model"
 	"ping-go/monitor"
 	"strings"
+	"text/template"
 	"time"
 
 	"github.com/benbjohnson/hashfs"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/zishang520/socket.io/socket"
-	"html/template"
-	"io/fs"
 )
 
 // Server 是应用程序的核心服务器结构体
@@ -39,6 +38,16 @@ func NewServer(monitorService *monitor.Service, staticFS http.FileSystem, static
 		hfs:            hashfs.NewFS(staticRoot),
 	}
 
+	// 配置 CORS
+	s.router.Use(cors.New(cors.Config{
+		AllowOrigins:     []string{"*"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
+		ExposeHeaders:    []string{"Content-Length"},
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour,
+	}))
+
 	// 健康检查端点
 	s.router.GET("/health", func(c *gin.Context) {
 		health := s.monitorService.HealthCheck()
@@ -58,12 +67,6 @@ func NewServer(monitorService *monitor.Service, staticFS http.FileSystem, static
 		c.JSON(http.StatusOK, gin.H{"status": "enabled"})
 	})
 
-	// 启动会话清理任务
-	go startSessionCleanup()
-
-	// 设置 Socket.IO 连接处理
-	s.setupSocketHandlers()
-
 	// 绑定监控心跳回调
 	s.monitorService.OnHeartbeat = func(h *model.Heartbeat) {
 		heartbeat := map[string]any{
@@ -77,124 +80,98 @@ func NewServer(monitorService *monitor.Service, staticFS http.FileSystem, static
 		s.socketServer.To("public").Emit("heartbeat", heartbeat)
 	}
 
-	// CORS 配置
-	corsConfig := cors.DefaultConfig()
-	corsConfig.AllowOriginFunc = func(origin string) bool {
-		if strings.Contains(origin, "localhost") || strings.Contains(origin, "127.0.0.1") {
-			return true
-		}
-		return false
-	}
-	corsConfig.AllowCredentials = true
-	corsConfig.AllowHeaders = []string{"Origin", "Content-Length", "Content-Type", "Authorization"}
-	s.router.Use(cors.New(corsConfig))
-
+	// 注册 API 路由
+	s.registerAPIRoutes()
+	// 注册 Socket.IO 路由
 	s.registerRoutes()
+
 	return s
 }
 
-// setupSocketHandlers 设置所有 Socket.IO 事件处理器
-func (s *Server) setupSocketHandlers() {
-	s.socketServer.On("connection", func(clients ...any) {
-		client := clients[0].(*socket.Socket)
-		client.Join("public")
-
-		// 断开连接时清理认证状态
-		client.On("disconnect", func(reason ...any) {
-			socketAuth.Delete(client.Id())
-		})
-
-		// 发送服务器信息
-		client.Emit("info", map[string]any{
-			"version": "1.0.0-go",
-		})
-
-		// 设置各功能模块的事件处理器
-		s.setupAuthHandlers(client)
-		s.setupNotificationHandlers(client)
-		s.setupSettingsHandlers(client)
-		s.setupMonitorHandlers(client)
-		s.setupHeartbeatHandlers(client)
-
-		// 断开连接日志
-		client.On("disconnect", func(reason ...any) {
-			fmt.Println("closed", client.Id())
-			socketAuth.Delete(client.Id())
-		})
-	})
+// registerAPIRoutes 注册 REST API 路由
+func (s *Server) registerAPIRoutes() {
+	api := s.router.Group("/api")
+	{
+		api.GET("/monitors", s.getMonitorsAPI)
+		api.POST("/monitors", s.createMonitorAPI)
+		api.DELETE("/monitors/:id", s.deleteMonitorAPI)
+	}
 }
 
-// Router 返回 gin.Engine 实例
+// Router 返回 Gin 引擎实例
 func (s *Server) Router() *gin.Engine {
 	return s.router
 }
 
-// registerRoutes 注册 HTTP 路由
+// registerRoutes 注册 Socket.IO 相关的路由
 func (s *Server) registerRoutes() {
-	// 主页
-	s.router.GET("/", func(c *gin.Context) {
-		s.serveStaticFileGin(c, "index.html")
-	})
-
-	// 管理面板
-	s.router.GET("/dashboard", func(c *gin.Context) {
-		s.serveStaticFileGin(c, "admin.html")
-	})
-
-	// Favicon
-	s.router.GET("/favicon.ico", func(c *gin.Context) {
-		s.serveStaticFileGin(c, "assets/favicon.avif")
-	})
-
 	// Socket.IO 端点
 	handler := s.socketServer.ServeHandler(nil)
 	s.router.GET("/socket.io/*any", gin.WrapH(handler))
 	s.router.POST("/socket.io/*any", gin.WrapH(handler))
+
+	// 设置 Socket.IO 连接处理
+	s.socketServer.On("connection", func(args ...any) {
+		client := args[0].(*socket.Socket)
+		client.Join("public")
+		s.setupAuthHandlers(client)
+		s.setupMonitorHandlers(client)
+		s.setupHeartbeatHandlers(client)
+		s.setupNotificationHandlers(client)
+		s.setupSettingsHandlers(client)
+	})
 }
 
 // serveStaticFileGin 为 gin.Context 提供静态文件服务
 func (s *Server) serveStaticFileGin(c *gin.Context, filename string) {
-	if s.staticFS != nil {
-		if strings.HasSuffix(filename, ".html") {
+	if s.staticRoot != nil {
+		// 检查是否是 HTML 文件或目录请求（通常是 index.html）
+		isHTML := strings.HasSuffix(filename, ".html")
+		targetFile := filename
+		if filename == "" || filename == "/" {
+			isHTML = true
+			targetFile = "index.html"
+		}
+
+		if isHTML {
 			// 如果是 HTML，作为模板处理，以便注入 hashfs
-			content, err := fs.ReadFile(s.staticRoot, filename)
+			content, err := fs.ReadFile(s.staticRoot, targetFile)
 			if err != nil {
-				c.String(http.StatusNotFound, filename+" not found")
+				// 如果直接读取失败，可能是子目录请求，交给 FileServer
+				http.FileServer(http.FS(s.hfs)).ServeHTTP(c.Writer, c.Request)
 				return
 			}
 
-			tmpl, err := template.New(filename).Funcs(template.FuncMap{
+			// 使用 text/template 提高对 HTML/JS 的兼容性
+			tmpl, err := template.New(targetFile).Funcs(template.FuncMap{
 				"Hash": func(path string) string {
 					return s.hfs.HashName(path)
 				},
 			}).Parse(string(content))
 
 			if err != nil {
-				log.Printf("failed to parse template %s: %v", filename, err)
-				// 如果解析失败，尝试直接输出原始 HTML，避免页面彻底打不开
+				log.Printf("failed to parse template %s: %v. Falling back to raw content.", targetFile, err)
 				c.Header("Content-Type", "text/html; charset=utf-8")
 				c.Writer.Write(content)
 				return
 			}
 
+			// 构造模板数据，支持 {{ .Hash "path" }}
+			data := map[string]any{
+				"Static": s.hfs,
+			}
+
 			c.Header("Content-Type", "text/html; charset=utf-8")
-			err = tmpl.Execute(c.Writer, nil)
+			c.Status(http.StatusOK) // 显式设置 200 状态码，防止 NoRoute 默认返回 404
+			err = tmpl.Execute(c.Writer, data)
 			if err != nil {
-				log.Printf("failed to execute template: %v", err)
+				log.Printf("failed to execute template %s: %v", targetFile, err)
 			}
 			return
 		}
 
 		// 对于非 HTML 文件，使用 hashfs 处理
-		// 如果请求的文件名包含哈希值，hashfs 会自动识别并打开原始文件
-		// 我们通过检查文件名是否与 HashName 匹配来判断是否应该设置强缓存
-		if filename != s.hfs.HashName(filename) {
-			// 如果 HashName(filename) 返回的结果包含哈希（即不是原始文件名），
-			// 说明这是一个合法的哈希请求路径（由模板 {{.Hash}} 生成）
-			// 注意：这里的逻辑稍微简化了，因为 filename 已经是被请求的文件名了
-		}
-		
-		// 实际上，hashfs 提供了一个简单的办法：如果文件名包含哈希，就设置强缓存
+		// 如果文件名包含哈希，就设置强缓存
 		_, hash := hashfs.ParseName(filename)
 		if hash != "" {
 			c.Header("Cache-Control", "public, max-age=31536000, immutable")
@@ -227,49 +204,11 @@ func (s *Server) SetStatic(fs http.FileSystem) {
 			return
 		}
 
+		// SPA 路由处理
 		if strings.HasPrefix(path, "/dashboard") {
 			s.serveStaticFileGin(c, "admin.html")
 		} else {
 			s.serveStaticFileGin(c, "index.html")
 		}
 	})
-}
-
-// getContentType 根据文件扩展名返回 Content-Type
-func getContentType(filename string) string {
-	switch {
-	case strings.HasSuffix(filename, ".js"):
-		return "application/javascript"
-	case strings.HasSuffix(filename, ".css"):
-		return "text/css"
-	case strings.HasSuffix(filename, ".avif"):
-		return "image/avif"
-	case strings.HasSuffix(filename, ".ico"):
-		return "image/x-icon"
-	case strings.HasSuffix(filename, ".png"):
-		return "image/png"
-	case strings.HasSuffix(filename, ".svg"):
-		return "image/svg+xml"
-	default:
-		return "text/html; charset=utf-8"
-	}
-}
-
-// readAll 从 io.Reader 读取所有内容
-func readAll(r interface{ Read([]byte) (int, error) }) ([]byte, error) {
-	var result []byte
-	buf := make([]byte, 4096)
-	for {
-		n, err := r.Read(buf)
-		if n > 0 {
-			result = append(result, buf[:n]...)
-		}
-		if err != nil {
-			if err.Error() == "EOF" {
-				break
-			}
-			return result, err
-		}
-	}
-	return result, nil
 }
