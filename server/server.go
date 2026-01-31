@@ -170,6 +170,7 @@ func (s *Server) serveStaticFileGin(c *gin.Context, filename string) {
 			}
 
 			c.Header("Content-Type", "text/html; charset=utf-8")
+			c.Header("Cache-Control", "no-cache")
 			c.Status(http.StatusOK) // 显式设置 200 状态码，防止 NoRoute 默认返回 404
 			err = tmpl.Execute(c.Writer, data)
 			if err != nil {
