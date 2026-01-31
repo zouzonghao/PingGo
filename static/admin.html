@@ -5,8 +5,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PingGo 管理面板</title>
-    <link rel="icon" href="{{ .Static.HashName "assets/favicon.avif" }}" type="image/avif">
-    <script src="{{ .Static.HashName "assets/tailwind.min.js" }}"></script>
+    <link rel="icon" href="{{ .Static.HashName " assets/favicon.avif" }}" type="image/avif">
+    <script src="{{ .Static.HashName " assets/tailwind.min.js" }}"></script>
     <script>
         tailwind.config = {
             theme: {
@@ -25,10 +25,10 @@
             }
         }
     </script>
-    <script src="{{ .Static.HashName "assets/socket.io.min.js" }}"></script>
-    <script defer src="{{ .Static.HashName "assets/alpine.min.js" }}"></script>
-    <script src="{{ .Static.HashName "assets/chart.min.js" }}"></script>
-    <link rel="stylesheet" href="{{ .Static.HashName "style.css" }}">
+    <script src="{{ .Static.HashName " assets/socket.io.min.js" }}"></script>
+    <script defer src="{{ .Static.HashName " assets/alpine.min.js" }}"></script>
+    <script src="{{ .Static.HashName " assets/chart.min.js" }}"></script>
+    <link rel="stylesheet" href="{{ .Static.HashName " style.css" }}">
     <style type="text/tailwindcss">
         [x-cloak] { display: none !important; }
         body { 
@@ -83,7 +83,8 @@
     <!-- Header -->
     <header class="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between sticky top-0 z-30">
         <div class="flex items-center gap-2">
-            <img src="assets/favicon.avif" alt="Logo" class="w-8 h-8 rounded-lg object-contain">
+            <img src="{{ .Static.HashName " assets/favicon.avif" }}" alt="Logo"
+                class="w-8 h-8 rounded-lg object-contain">
             <h1 class="text-2xl font-bold tracking-tight text-gray-900">PingGo</h1>
         </div>
         <div class="flex items-center gap-4">
@@ -222,8 +223,7 @@
             <!-- Chart Container - Always in DOM, controlled by x-show to prevent Chart.js errors -->
             <div x-show="dashboardView === 'details' && currentMonitor" x-cloak class="max-w-6xl mx-auto space-y-6">
                 <!-- Top Info -->
-                <div class="flex flex-col md:flex-row justify-between md:items-start gap-6"
-                    x-show="currentMonitor">
+                <div class="flex flex-col md:flex-row justify-between md:items-start gap-6" x-show="currentMonitor">
                     <div class="min-w-0">
                         <div class="flex items-center gap-3 mb-1">
                             <h2 class="text-2xl font-bold text-gray-900 truncate cursor-help"
@@ -235,7 +235,8 @@
                                 x-text="currentMonitor ? '#' + currentMonitor.id : ''"></span>
                         </div>
                         <a :href="currentMonitor?.url" target="_blank"
-                            class="text-primary hover:underline text-sm font-medium break-all" x-text="currentMonitor?.url"></a>
+                            class="text-primary hover:underline text-sm font-medium break-all"
+                            x-text="currentMonitor?.url"></a>
                     </div>
                     <div class="flex flex-wrap gap-2 shrink-0">
                         <button @click="togglePause(currentMonitor)"
@@ -401,7 +402,8 @@
 
                 <!-- Event Logs -->
                 <div class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-                    <div class="p-6 border-b border-gray-50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                    <div
+                        class="p-6 border-b border-gray-50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                         <h3 class="font-bold text-gray-800">最近事件</h3>
                         <button @click="clearLogs"
                             class="w-full sm:w-auto bg-white border border-danger/30 text-danger hover:bg-danger/5 px-4 py-1.5 rounded-lg text-sm font-semibold flex items-center justify-center gap-1 transition">
@@ -415,51 +417,55 @@
                     </div>
                     <div class="overflow-x-auto scrollbar-thin">
                         <table class="w-full text-left min-w-[500px] table-fixed">
-                        <thead class="bg-gray-50">
-                            <tr>
-                                <th class="w-24 px-6 py-3 text-xs font-bold text-gray-400 uppercase tracking-wider">状态</th>
-                                <th class="w-40 px-6 py-3 text-xs font-bold text-gray-400 uppercase tracking-wider">日期时间</th>
-                                <th class="px-6 py-3 text-xs font-bold text-gray-400 uppercase tracking-wider">消息</th>
-                            </tr>
-                        </thead>
-                        <tbody class="divide-y divide-gray-50">
-                            <template x-for="hb in heartbeats" :key="hb.id || hb.time">
-                                <tr class="hover:bg-gray-50 transition-colors">
-                                    <td class="px-6 py-4">
-                                        <span class="px-2 py-1 rounded-full text-[10px] font-bold"
-                                            :class="hb.status === 1 ? 'bg-primary/10 text-primary' : 'bg-danger/10 text-danger'">
-                                            <span x-text="statusText(hb.status)"></span>
-                                        </span>
-                                    </td>
-                                    <td class="px-6 py-4 text-xs text-gray-500 font-mono"
-                                        x-text="formatDate(hb.rawTime || hb.time)"></td>
-                                    <td class="px-6 py-4 text-sm text-gray-700">
-                                        <div class="flex items-center gap-2 group cursor-pointer"
-                                            @click="openMsgDetail(hb.msg)" title="点击查看详情">
-                                            <div class="truncate font-mono text-xs"
-                                                x-text="hb.msg"></div>
-                                            <svg class="w-4 h-4 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
-                                                fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z">
-                                                </path>
-                                            </svg>
-                                        </div>
-                                    </td>
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="w-24 px-6 py-3 text-xs font-bold text-gray-400 uppercase tracking-wider">
+                                        状态</th>
+                                    <th class="w-40 px-6 py-3 text-xs font-bold text-gray-400 uppercase tracking-wider">
+                                        日期时间</th>
+                                    <th class="px-6 py-3 text-xs font-bold text-gray-400 uppercase tracking-wider">消息
+                                    </th>
                                 </tr>
-                            </template>
-                        </tbody>
-                    </table>
+                            </thead>
+                            <tbody class="divide-y divide-gray-50">
+                                <template x-for="hb in heartbeats" :key="hb.id || hb.time">
+                                    <tr class="hover:bg-gray-50 transition-colors">
+                                        <td class="px-6 py-4">
+                                            <span class="px-2 py-1 rounded-full text-[10px] font-bold"
+                                                :class="hb.status === 1 ? 'bg-primary/10 text-primary' : 'bg-danger/10 text-danger'">
+                                                <span x-text="statusText(hb.status)"></span>
+                                            </span>
+                                        </td>
+                                        <td class="px-6 py-4 text-xs text-gray-500 font-mono"
+                                            x-text="formatDate(hb.rawTime || hb.time)"></td>
+                                        <td class="px-6 py-4 text-sm text-gray-700">
+                                            <div class="flex items-center gap-2 group cursor-pointer"
+                                                @click="openMsgDetail(hb.msg)" title="点击查看详情">
+                                                <div class="truncate font-mono text-xs" x-text="hb.msg"></div>
+                                                <svg class="w-4 h-4 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                                                    fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                                        stroke-width="2"
+                                                        d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z">
+                                                    </path>
+                                                </svg>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div x-show="heartbeats.length === 0" class="p-12 text-center text-gray-400 text-sm">暂无日志。</div>
                 </div>
-                <div x-show="heartbeats.length === 0" class="p-12 text-center text-gray-400 text-sm">暂无日志。</div>
-            </div>
             </div>
 
             <!-- Form View (Add/Edit) -->
             <template x-if="dashboardView === 'form'">
                 <div class="max-w-4xl mx-auto bg-white p-6 md:p-12 rounded-3xl border border-gray-100 shadow-xl">
                     <div class="mb-6 md:mb-10 text-center">
-                        <h2 class="text-2xl md:text-3xl font-bold text-gray-900 mb-2" x-text="isEditing ? '编辑监控项' : '添加新监控项'"></h2>
+                        <h2 class="text-2xl md:text-3xl font-bold text-gray-900 mb-2"
+                            x-text="isEditing ? '编辑监控项' : '添加新监控项'"></h2>
                         <p class="text-gray-500 text-sm md:text-base">配置您想要监控的服务参数</p>
                     </div>
                     <form @submit.prevent="saveMonitor" class="space-y-8">
@@ -739,23 +745,33 @@
                     <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
                         <div
                             class="bg-white p-4 md:p-6 lg:p-8 rounded-2xl md:rounded-3xl border border-gray-100 shadow-sm flex flex-col items-center justify-center text-center">
-                            <span class="text-gray-400 text-[10px] md:text-xs font-bold uppercase tracking-widest mb-1 md:mb-3">总监控项</span>
-                            <span class="text-xl md:text-3xl lg:text-4xl font-black text-dark" x-text="globalStats.total"></span>
+                            <span
+                                class="text-gray-400 text-[10px] md:text-xs font-bold uppercase tracking-widest mb-1 md:mb-3">总监控项</span>
+                            <span class="text-xl md:text-3xl lg:text-4xl font-black text-dark"
+                                x-text="globalStats.total"></span>
                         </div>
                         <div
                             class="bg-white p-4 md:p-6 lg:p-8 rounded-2xl md:rounded-3xl border border-gray-100 shadow-sm flex flex-col items-center justify-center text-center">
-                            <span class="text-primary text-[10px] md:text-xs font-bold uppercase tracking-widest mb-1 md:mb-3">运行中 (正常)</span>
-                            <span class="text-xl md:text-3xl lg:text-4xl font-black text-primary" x-text="globalStats.up"></span>
+                            <span
+                                class="text-primary text-[10px] md:text-xs font-bold uppercase tracking-widest mb-1 md:mb-3">运行中
+                                (正常)</span>
+                            <span class="text-xl md:text-3xl lg:text-4xl font-black text-primary"
+                                x-text="globalStats.up"></span>
                         </div>
                         <div
                             class="bg-white p-4 md:p-6 lg:p-8 rounded-2xl md:rounded-3xl border border-gray-100 shadow-sm flex flex-col items-center justify-center text-center">
-                            <span class="text-danger text-[10px] md:text-xs font-bold uppercase tracking-widest mb-1 md:mb-3">运行中 (异常)</span>
-                            <span class="text-xl md:text-3xl lg:text-4xl font-black text-danger" x-text="globalStats.down"></span>
+                            <span
+                                class="text-danger text-[10px] md:text-xs font-bold uppercase tracking-widest mb-1 md:mb-3">运行中
+                                (异常)</span>
+                            <span class="text-xl md:text-3xl lg:text-4xl font-black text-danger"
+                                x-text="globalStats.down"></span>
                         </div>
                         <div
                             class="bg-white p-4 md:p-6 lg:p-8 rounded-2xl md:rounded-3xl border border-gray-100 shadow-sm flex flex-col items-center justify-center text-center">
-                            <span class="text-gray-400 text-[10px] md:text-xs font-bold uppercase tracking-widest mb-1 md:mb-3">已暂停</span>
-                            <span class="text-xl md:text-3xl lg:text-4xl font-black text-gray-500" x-text="globalStats.paused"></span>
+                            <span
+                                class="text-gray-400 text-[10px] md:text-xs font-bold uppercase tracking-widest mb-1 md:mb-3">已暂停</span>
+                            <span class="text-xl md:text-3xl lg:text-4xl font-black text-gray-500"
+                                x-text="globalStats.paused"></span>
                         </div>
                     </div>
 
@@ -833,7 +849,8 @@
                                                     :class="n.active ? 'left-5' : 'left-1'"></div>
                                             </button>
 
-                                            <div class="flex-1 grid grid-cols-1 sm:grid-cols-12 gap-2 sm:gap-4 items-center">
+                                            <div
+                                                class="flex-1 grid grid-cols-1 sm:grid-cols-12 gap-2 sm:gap-4 items-center">
                                                 <div class="sm:col-span-4 font-bold text-gray-700 text-sm truncate"
                                                     x-text="n.name"></div>
 
@@ -855,8 +872,7 @@
                                             </div>
                                         </div>
 
-                                        <div
-                                            class="flex items-center justify-end gap-1 ml-2">
+                                        <div class="flex items-center justify-end gap-1 ml-2">
                                             <button @click="openEditNotification(n)"
                                                 class="text-gray-400 sm:text-gray-300 hover:text-indigo-600 p-2 transition-colors">
                                                 <svg class="w-4 h-4" fill="none" stroke="currentColor"
@@ -933,7 +949,8 @@
                                                     :class="n.active ? 'left-5' : 'left-1'"></div>
                                             </button>
 
-                                            <div class="flex-1 grid grid-cols-1 sm:grid-cols-12 gap-2 sm:gap-4 items-center">
+                                            <div
+                                                class="flex-1 grid grid-cols-1 sm:grid-cols-12 gap-2 sm:gap-4 items-center">
                                                 <div class="sm:col-span-4 font-bold text-gray-700 text-sm truncate"
                                                     x-text="n.name"></div>
 
@@ -955,8 +972,7 @@
                                             </div>
                                         </div>
 
-                                        <div
-                                            class="flex items-center justify-end gap-1 ml-2">
+                                        <div class="flex items-center justify-end gap-1 ml-2">
                                             <button @click="openEditNotification(n)"
                                                 class="text-gray-400 sm:text-gray-300 hover:text-amber-600 p-2 transition-colors">
                                                 <svg class="w-4 h-4" fill="none" stroke="currentColor"
@@ -1352,7 +1368,7 @@
         </div>
     </div>
 
-    <script src="{{ .Static.HashName "app.js" }}"></script>
+    <script src="{{ .Static.HashName " app.js" }}"></script>
 </body>
 
 </html>

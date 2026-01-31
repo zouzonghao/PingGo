@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
 	"ping-go/db"
 	"ping-go/model"
 	"ping-go/monitor"
@@ -38,15 +39,26 @@ func NewServer(monitorService *monitor.Service, staticFS http.FileSystem, static
 		hfs:            hashfs.NewFS(staticRoot),
 	}
 
+	// 启动会话清理任务
+	go startSessionCleanup()
+
 	// 配置 CORS
-	s.router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"*"},
+	corsConfig := cors.Config{
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
 		ExposeHeaders:    []string{"Content-Length"},
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
-	}))
+	}
+
+	if os.Getenv("DEBUG") == "true" {
+		corsConfig.AllowOrigins = []string{"*"}
+	} else {
+		corsConfig.AllowOriginFunc = func(origin string) bool {
+			return true
+		}
+	}
+	s.router.Use(cors.New(corsConfig))
 
 	// 健康检查端点
 	s.router.GET("/health", func(c *gin.Context) {
@@ -143,11 +155,7 @@ func (s *Server) serveStaticFileGin(c *gin.Context, filename string) {
 			}
 
 			// 使用 text/template 提高对 HTML/JS 的兼容性
-			tmpl, err := template.New(targetFile).Funcs(template.FuncMap{
-				"Hash": func(path string) string {
-					return s.hfs.HashName(path)
-				},
-			}).Parse(string(content))
+			tmpl, err := template.New(targetFile).Parse(string(content))
 
 			if err != nil {
 				log.Printf("failed to parse template %s: %v. Falling back to raw content.", targetFile, err)
@@ -173,8 +181,10 @@ func (s *Server) serveStaticFileGin(c *gin.Context, filename string) {
 		// 对于非 HTML 文件，使用 hashfs 处理
 		// 如果文件名包含哈希，就设置强缓存
 		_, hash := hashfs.ParseName(filename)
-		if hash != "" {
+		if hash != "" && os.Getenv("DEBUG") != "true" {
 			c.Header("Cache-Control", "public, max-age=31536000, immutable")
+		} else {
+			c.Header("Cache-Control", "no-cache")
 		}
 		http.FileServer(http.FS(s.hfs)).ServeHTTP(c.Writer, c.Request)
 	} else {
@@ -205,6 +215,11 @@ func (s *Server) SetStatic(fs http.FileSystem) {
 		}
 
 		// SPA 路由处理
+		if path == "favicon.ico" {
+			c.Status(http.StatusNotFound)
+			return
+		}
+
 		if strings.HasPrefix(path, "/dashboard") {
 			s.serveStaticFileGin(c, "admin.html")
 		} else {

@@ -41,6 +41,9 @@ func main() {
 	var staticRoot fs.FS
 	if os.Getenv("DEBUG") == "true" {
 		log.Println("Running in debug mode, using local static files")
+		if _, err := os.Stat("static"); os.IsNotExist(err) {
+			log.Fatal("Error: 'static' directory not found. Cannot run in debug mode without it.")
+		}
 		staticRoot = os.DirFS("static")
 	} else {
 		staticRoot, _ = fs.Sub(staticFS, "static")

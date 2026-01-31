@@ -9,7 +9,7 @@ import (
 
 	"github.com/tdewolff/minify/v2"
 	"github.com/tdewolff/minify/v2/css"
-	"github.com/tdewolff/minify/v2/html"
+
 	"github.com/tdewolff/minify/v2/js"
 	"github.com/tdewolff/minify/v2/json"
 	"github.com/tdewolff/minify/v2/svg"
@@ -18,11 +18,7 @@ import (
 func main() {
 	m := minify.New()
 	m.AddFunc("text/css", css.Minify)
-	m.Add("text/html", &html.Minifier{
-		KeepDocumentTags: true,
-		KeepEndTags:      true,
-		KeepQuotes:       true, // 保持引号，避免模板语法在某些属性中出错
-	})
+
 	m.AddFunc("image/svg+xml", svg.Minify)
 	m.AddFuncRegexp(regexp.MustCompile("^(application|text)/(x-)?(java|ecma)script$"), js.Minify)
 	m.AddFuncRegexp(regexp.MustCompile("[/+]json$"), json.Minify)
@@ -43,8 +39,7 @@ func main() {
 			mimetype = "text/css"
 		case ".js":
 			mimetype = "text/javascript"
-		case ".html":
-			mimetype = "text/html"
+
 		case ".json":
 			mimetype = "application/json"
 		case ".svg":
@@ -62,6 +57,11 @@ func main() {
 		output, err := m.Bytes(mimetype, input)
 		if err != nil {
 			return err
+		}
+
+		if os.Getenv("PRODUCTION_BUILD") != "true" {
+			log.Printf("Dry run: Skipping write to %s (set PRODUCTION_BUILD=true to overwrite)", path)
+			return nil
 		}
 
 		return os.WriteFile(path, output, 0644)
