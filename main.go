@@ -18,8 +18,8 @@ import (
 	_ "time/tzdata"
 )
 
-//go:embed dist/*
-var distFS embed.FS
+//go:embed static/*
+var staticFS embed.FS
 
 func main() {
 	log.Println("Starting ping-go...")
@@ -37,13 +37,19 @@ func main() {
 	// Initialize Monitor Service
 	monitorService := monitor.NewService()
 
-	// Static Files (Embedded)
-	distRoot, _ := fs.Sub(distFS, "dist")
-	staticFS := http.FS(distRoot)
+	// Static Files (Embedded or Local)
+	var staticRoot fs.FS
+	if os.Getenv("DEBUG") == "true" {
+		log.Println("Running in debug mode, using local static files")
+		staticRoot = os.DirFS("static")
+	} else {
+		staticRoot, _ = fs.Sub(staticFS, "static")
+	}
+	staticHTTPFS := http.FS(staticRoot)
 
 	// Initialize Web Server
-	srv := server.NewServer(monitorService, staticFS)
-	srv.SetStatic(staticFS)
+	srv := server.NewServer(monitorService, staticHTTPFS, staticRoot)
+	srv.SetStatic(staticHTTPFS)
 
 	// Start Monitoring AFTER server initialization to ensure OnStatusChange is set
 	monitorService.Start()

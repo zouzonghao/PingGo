@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PingGo</title>
-    <link rel="icon" href="assets/favicon.avif" type="image/avif">
+    <link rel="icon" href="{{ .Hash "assets/favicon.avif" }}" type="image/avif">
     <style>
         [x-cloak] {
             display: none !important;
@@ -16,7 +16,7 @@
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
         }
     </style>
-    <script src="assets/tailwind.min.js"></script>
+    <script src="{{ .Hash "assets/tailwind.min.js" }}"></script>
     <script>
         tailwind.config = {
             theme: {
@@ -41,8 +41,8 @@
             }
         }
     </script>
-    <script src="assets/socket.io.min.js"></script>
-    <script defer src="assets/alpine.min.js"></script>
+    <script src="{{ .Hash "assets/socket.io.min.js" }}"></script>
+    <script defer src="{{ .Hash "assets/alpine.min.js" }}"></script>
     <style>
         [x-cloak] {
             display: none !important;
@@ -55,7 +55,7 @@
         <!-- Header -->
         <header class="flex justify-between items-start mb-8">
             <div class="flex items-center gap-4">
-                <img src="assets/favicon.avif" alt="Logo" class="w-14 h-14 rounded-2xl shadow-sm ml-1">
+                <img src="{{ .Hash "assets/favicon.avif" }}" alt="Logo" class="w-14 h-14 rounded-2xl shadow-sm ml-1">
                 <div>
                     <h1 class="text-3xl font-bold text-title mb-1">PingGo</h1>
                     <p class="text-sm text-subtitle">实时监控服务健康状况</p>
@@ -190,7 +190,7 @@
         </p>
     </footer>
 
-    <script src="index.js"></script>
+    <script src="{{ .Hash "index.js" }}"></script>
 </body>
 
 </html>

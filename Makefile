@@ -22,6 +22,11 @@ run:
 	@echo "Running in development mode..."
 	@$(GORUN) .
 
+# Minify assets (manually call this if needed)
+minify:
+	@echo "Minifying assets..."
+	@$(GORUN) scripts/build_assets.go
+
 # Build for current platform
 build:
 	@{ \
@@ -47,4 +52,4 @@ clean:
 	@rm -f pinggo pinggo-*
 	@echo "Clean complete."
 
-.PHONY: default run build release-all clean
+.PHONY: default run minify build release-all clean

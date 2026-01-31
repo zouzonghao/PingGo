@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"ping-go/db"
 	"ping-go/model"
@@ -9,9 +10,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/benbjohnson/hashfs"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/zishang520/socket.io/socket"
+	"html/template"
+	"io/fs"
 )
 
 // Server 是应用程序的核心服务器结构体
@@ -20,15 +24,19 @@ type Server struct {
 	socketServer   *socket.Server
 	monitorService *monitor.Service
 	staticFS       http.FileSystem
+	staticRoot     fs.FS
+	hfs            *hashfs.FS
 }
 
 // NewServer 创建并初始化一个新的服务器实例
-func NewServer(monitorService *monitor.Service, staticFS http.FileSystem) *Server {
+func NewServer(monitorService *monitor.Service, staticFS http.FileSystem, staticRoot fs.FS) *Server {
 	s := &Server{
 		router:         gin.Default(),
 		socketServer:   socket.NewServer(nil, nil),
 		monitorService: monitorService,
 		staticFS:       staticFS,
+		staticRoot:     staticRoot,
+		hfs:            hashfs.NewFS(staticRoot),
 	}
 
 	// 健康检查端点
@@ -147,20 +155,36 @@ func (s *Server) registerRoutes() {
 // serveStaticFileGin 为 gin.Context 提供静态文件服务
 func (s *Server) serveStaticFileGin(c *gin.Context, filename string) {
 	if s.staticFS != nil {
-		f, err := s.staticFS.Open(filename)
-		if err != nil {
-			c.String(http.StatusNotFound, filename+" not found")
-			return
-		}
-		defer f.Close()
-		content, err := readAll(f)
-		if err != nil {
-			c.String(http.StatusInternalServerError, "failed to read "+filename)
+		if strings.HasSuffix(filename, ".html") {
+			// 如果是 HTML，作为模板处理，以便注入 hashfs
+			content, err := fs.ReadFile(s.staticRoot, filename)
+			if err != nil {
+				c.String(http.StatusNotFound, filename+" not found")
+				return
+			}
+
+			tmpl, err := template.New(filename).Funcs(template.FuncMap{
+				"Hash": func(path string) string {
+					return s.hfs.HashName(path)
+				},
+			}).Parse(string(content))
+
+			if err != nil {
+				c.String(http.StatusInternalServerError, "failed to parse template "+filename)
+				return
+			}
+
+			c.Header("Content-Type", "text/html; charset=utf-8")
+			err = tmpl.Execute(c.Writer, nil)
+			if err != nil {
+				log.Printf("failed to execute template: %v", err)
+			}
 			return
 		}
 
-		contentType := getContentType(filename)
-		c.Data(http.StatusOK, contentType, content)
+		// 对于非 HTML 文件，使用 hashfs 处理缓存
+		// 如果路径包含哈希，hashfs 会自动设置强缓存请求头
+		s.hfs.FileServer().ServeHTTP(c.Writer, c.Request)
 	} else {
 		c.String(http.StatusOK, "Frontend not loaded")
 	}
